@@ -212,6 +212,20 @@ export default function Upgrader({
         const roundProfit = currentWin - currentBet;
         onUpdateBalance((prev) => prev + roundProfit);
         playSound('win');
+// Record the spin result in the persistent DB
+fetch('/api/upgrader/record', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    isWin: true,
+    user: username,
+    discordId: discordUser ? discordUser.id : null,
+    avatar: discordUser ? discordUser.avatar : null,
+    bet: currentBet,
+    mult: currentMult,
+    amount: currentWin
+  })
+}).catch(e => console.warn('Failed to record win', e));
 
         if (currentWin >= 10000) {
           confetti({
@@ -252,6 +266,20 @@ export default function Upgrader({
         setResult('loss');
         setLastLostAmount(currentBet);
         playSound('loss');
+// Record loss result
+fetch('/api/upgrader/record', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    isWin: false,
+    user: username,
+    discordId: discordUser ? discordUser.id : null,
+    avatar: discordUser ? discordUser.avatar : null,
+    bet: currentBet,
+    mult: currentMult,
+    amount: 0
+  })
+}).catch(e => console.warn('Failed to record loss', e));
         onUpdateBalance((prev) => prev - currentBet);
 
         setRealLosses(prev => [
@@ -284,7 +312,7 @@ export default function Upgrader({
             <div className="flex items-center gap-1.5">
               <Sparkles className="w-4 h-4 text-sky-400 animate-pulse" />
               <span className="text-xs font-orbitron font-black text-sky-400 uppercase tracking-wider">
-                ВЫИГРЫШИ (REAL)
+                WIN
               </span>
             </div>
             <span className="text-[10px] font-mono font-bold text-sky-500/70">
@@ -799,7 +827,7 @@ export default function Upgrader({
             <div className="flex items-center gap-1.5">
               <ChevronsDown className="w-4 h-4 text-rose-500" />
               <span className="text-xs font-orbitron font-black text-rose-500 uppercase tracking-wider">
-                ПРОИГРЫШИ (REAL)
+                LOSE
               </span>
             </div>
             <span className="text-[10px] font-mono font-bold text-rose-500/70">

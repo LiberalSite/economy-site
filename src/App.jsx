@@ -3,43 +3,58 @@ import Navbar from './components/Navbar';
 import HeroSection from './components/HeroSection';
 import Upgrader from './components/Upgrader';
 import DiscordAuthModal from './components/DiscordAuthModal';
+import Leaderboard from './components/Leaderboard';
+import PayForm from './components/PayForm';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('main');
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [discordUser, setDiscordUser] = useState(null);
-  const [userBalance, setUserBalance] = useState(100000); // 100,000 LC for testing!
+  const [userBalance, setUserBalance] = useState(1000);
   const [theme, setTheme] = useState('light');
 
-  // Load saved session, theme or boost balance
+  // Load saved session, theme and fetch real balance
   useEffect(() => {
     try {
+      let activeUser = null;
+
       // 1. Check if redirected from Discord OAuth callback
       const params = new URLSearchParams(window.location.search);
       if (params.get('auth_success') === 'true' && params.get('user')) {
         try {
-          const userObj = JSON.parse(decodeURIComponent(params.get('user')));
-          setDiscordUser(userObj);
-          localStorage.setItem('fazenn_discord_user', JSON.stringify(userObj));
-          // Clean URL params without refreshing
+          activeUser = JSON.parse(decodeURIComponent(params.get('user')));
+          setDiscordUser(activeUser);
+          localStorage.setItem('fazenn_discord_user', JSON.stringify(activeUser));
           window.history.replaceState({}, document.title, window.location.pathname);
         } catch (authErr) {
           console.warn("Failed to parse Discord OAuth user", authErr);
         }
       } else {
         const savedUser = localStorage.getItem('fazenn_discord_user');
-        if (savedUser) setDiscordUser(JSON.parse(savedUser));
+        if (savedUser) {
+          activeUser = JSON.parse(savedUser);
+          setDiscordUser(activeUser);
+        }
       }
 
-      const savedBalance = localStorage.getItem('fazenn_balance');
-      const savedTheme = localStorage.getItem('fazenn_theme');
-      
-      // If user had a lower balance, boost to at least 100,000 LC for testing
-      const parsedBalance = savedBalance ? parseInt(savedBalance, 10) : 100000;
-      const boostedBalance = Math.max(100000, parsedBalance || 100000);
-      setUserBalance(boostedBalance);
-      localStorage.setItem('fazenn_balance', boostedBalance.toString());
+      // 2. If user is logged in, fetch their REAL balance from database / bot
+      if (activeUser?.id) {
+        fetch(`/api/economy/balance?userId=${activeUser.id}`)
+          .then(res => res.json())
+          .then(data => {
+            if (data.success && typeof data.balance === 'number') {
+              setUserBalance(data.balance);
+            }
+          })
+          .catch(err => console.warn("Failed to fetch initial balance:", err));
+      } else {
+        // Guest mode demo balance
+        const guestBal = localStorage.getItem('fazenn_guest_balance');
+        setUserBalance(guestBal ? parseInt(guestBal, 10) : 5000);
+      }
 
+      // 3. Theme setup
+      const savedTheme = localStorage.getItem('fazenn_theme');
       if (savedTheme) {
         setTheme(savedTheme);
         document.body.className = savedTheme === 'dark' ? 'dark-theme' : 'light-theme';
@@ -64,37 +79,60 @@ export default function App() {
     setUserBalance((prev) => {
       const updated = typeof newBalance === 'function' ? newBalance(prev) : newBalance;
       const safeVal = Math.max(0, Math.round(updated));
-      try {
-        localStorage.setItem('fazenn_balance', safeVal.toString());
-      } catch (e) {
-        console.warn("Storage save failed", e);
+
+      if (discordUser?.id) {
+        // Sync real balance to database/bot
+        fetch('/api/economy/update', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userId: discordUser.id,
+            username: discordUser.username,
+            newBalance: safeVal
+          })
+        }).catch(e => console.warn("Failed to sync balance with server:", e));
+      } else {
+        try {
+          localStorage.setItem('fazenn_guest_balance', safeVal.toString());
+        } catch (e) {}
       }
+
       return safeVal;
     });
   };
 
   const handleAddCoins = (amount = 25000) => {
-    handleUpdateBalance((prev) => prev + amount);
+    // Only available for guests/demo mode
+    if (!discordUser) {
+      handleUpdateBalance((prev) => prev + amount);
+    }
   };
 
   const handleLogin = (user) => {
     setDiscordUser(user);
-    const balance = user.balance && user.balance > 10000 ? user.balance : 100000;
-    setUserBalance(balance);
     try {
       localStorage.setItem('fazenn_discord_user', JSON.stringify(user));
-      localStorage.setItem('fazenn_balance', balance.toString());
-    } catch (e) {
-      console.warn("Storage save failed", e);
-    }
+    } catch (e) {}
+
+    // Load user's real balance from database
+    fetch(`/api/economy/balance?userId=${user.id}`)
+      .then(res => res.json())
+      .then(data => {
+        if (data.success && typeof data.balance === 'number') {
+          setUserBalance(data.balance);
+        } else {
+          setUserBalance(0);
+        }
+      })
+      .catch(() => setUserBalance(0));
   };
 
   const handleLogout = () => {
     setDiscordUser(null);
-    setUserBalance(100000);
+    setUserBalance(5000);
     try {
       localStorage.removeItem('fazenn_discord_user');
-      localStorage.setItem('fazenn_balance', '100000');
+      localStorage.setItem('fazenn_guest_balance', '5000');
     } catch (e) {
       console.warn("Storage clear failed", e);
     }
@@ -124,6 +162,10 @@ export default function App() {
       <main className="flex-1 flex flex-col">
         {activeTab === 'main' ? (
           <HeroSection theme={theme} />
+        ) : activeTab === 'leaderboard' ? (
+          <Leaderboard theme={theme} />
+        ) : activeTab === 'pay' ? (
+          <PayForm theme={theme} onClose={() => setActiveTab('main')} />
         ) : (
           <Upgrader
             userBalance={userBalance}

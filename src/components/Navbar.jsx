@@ -22,7 +22,7 @@ export default function Navbar({ activeTab, setActiveTab, user, onOpenAuthModal,
             LG
           </div>
           <span className="font-orbitron font-black text-xl sm:text-2xl tracking-wider">
-            LG ECONOMY
+            ECONOMY
           </span>
         </div>
 
@@ -60,8 +60,32 @@ export default function Navbar({ activeTab, setActiveTab, user, onOpenAuthModal,
           >
             <ChevronsUp className="w-4 h-4" />
             <span>UPGRADER</span>
+          {/* Leaderboard button */}
+          <button
+            onClick={() => setActiveTab('leaderboard')}
+            className={`px-6 py-2.5 text-xs font-orbitron font-black transition-all flex items-center gap-2 ${
+              activeTab === 'leaderboard'
+                ? 'bg-sky-600 text-white shadow-sm'
+                : isDark
+                  ? 'text-slate-300 hover:text-white hover:bg-[#1e293b]'
+                  : 'text-slate-700 hover:text-sky-600 hover:bg-white'
+            }`}
+          >
+            <span>LEADERBOARD</span>
           </button>
-        </nav>
+          {/* Pay button */}
+          <button
+            onClick={() => setActiveTab('pay')}
+            className={`px-6 py-2.5 text-xs font-orbitron font-black transition-all flex items-center gap-2 ${
+              activeTab === 'pay'
+                ? 'bg-sky-600 text-white shadow-sm'
+                : isDark
+                  ? 'text-slate-300 hover:text-white hover:bg-[#1e293b]'
+                  : 'text-slate-700 hover:text-sky-600 hover:bg-white'
+            }`}
+          >
+            <span>PAY</span>
+          </button>
 
         {/* Right side: Balance with instant +25,000 top up, Dark Theme Toggle, Discord Button */}
         <div className="flex items-center gap-3">
@@ -76,14 +100,16 @@ export default function Navbar({ activeTab, setActiveTab, user, onOpenAuthModal,
               className="text-sky-500 text-sm font-black" 
             />
             <CoinIcon className="w-4 h-4 ml-0.5" />
-            <button
-              onClick={onAddCoins}
-              className="ml-2 px-2 py-0.5 bg-sky-600 hover:bg-sky-700 text-white font-mono text-[10px] font-black shadow-sm transition-transform active:scale-90 flex items-center gap-1"
-              title="Добавить +25,000 для тестов"
-            >
-              <Plus className="w-3 h-3" />
-              <span>25K</span>
-            </button>
+            {!user && (
+              <button
+                onClick={onAddCoins}
+                className="ml-2 px-2 py-0.5 bg-sky-600 hover:bg-sky-700 text-white font-mono text-[10px] font-black shadow-sm transition-transform active:scale-90 flex items-center gap-1"
+                title="Добавить +25,000 для тестов"
+              >
+                <Plus className="w-3 h-3" />
+                <span>25K</span>
+              </button>
+            )}
           </div>
 
           {/* Theme Toggle */}

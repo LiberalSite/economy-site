@@ -96,17 +96,7 @@ export default function DiscordAuthModal({ isOpen, onClose, user, onLogin, onLog
               <span>Войти</span>
             </button>
 
-            {/* Quick Demo Login Option for testing */}
-            <div className="pt-2 text-center">
-              <button
-                onClick={handleDemoLogin}
-                className={`text-[10px] font-mono font-bold underline transition-colors ${
-                  isDark ? 'text-slate-500 hover:text-slate-300' : 'text-slate-400 hover:text-slate-600'
-                }`}
-              >
-                Тестовый вход (демо)
-              </button>
-            </div>
+
           </div>
         )}
 

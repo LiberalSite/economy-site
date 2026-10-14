@@ -1,0 +1,29 @@
+app = "fly-node"
+
+[build]
+  image = "Dockerfile"
+
+[env]
+  NODE_ENV = "production"
+  PORT = "3000"
+
+[[services]]
+  internal_port = 3000
+  protocol = "tcp"
+  [services.concurrency]
+    hard_limit = 25
+    soft_limit = 20
+  [[services.ports]]
+    handlers = ["http"]
+    port = 80
+  [[services.ports]]
+    handlers = ["tls", "http"]
+    port = 443
+
+[metrics]
+  port = 9091
+  path = "/metrics"
+
+[mounts]
+  source = "data"
+  destination = "/data"
