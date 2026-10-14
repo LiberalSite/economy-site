@@ -9,6 +9,54 @@
   },
   "logs": [
     {
+      "id": 1791990153891,
+      "type": "upgrader_spin",
+      "isWin": false,
+      "user": "Вы",
+      "discordId": null,
+      "avatar": null,
+      "bet": 100,
+      "mult": 2,
+      "amount": 0,
+      "timestamp": "2026-10-14T15:02:33.390Z"
+    },
+    {
+      "id": 1791990147665,
+      "type": "upgrader_spin",
+      "isWin": false,
+      "user": "Вы",
+      "discordId": null,
+      "avatar": null,
+      "bet": 100,
+      "mult": 2,
+      "amount": 0,
+      "timestamp": "2026-10-14T15:02:26.696Z"
+    },
+    {
+      "id": 1791990141573,
+      "type": "upgrader_spin",
+      "isWin": false,
+      "user": "Вы",
+      "discordId": null,
+      "avatar": null,
+      "bet": 100,
+      "mult": 2,
+      "amount": 0,
+      "timestamp": "2026-10-14T15:02:20.711Z"
+    },
+    {
+      "id": 1791990135575,
+      "type": "upgrader_spin",
+      "isWin": false,
+      "user": "Вы",
+      "discordId": null,
+      "avatar": null,
+      "bet": 100,
+      "mult": 2,
+      "amount": 0,
+      "timestamp": "2026-10-14T15:02:14.946Z"
+    },
+    {
       "id": 1791989232228,
       "type": "upgrader_spin",
       "isWin": false,

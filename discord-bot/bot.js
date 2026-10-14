@@ -373,7 +373,7 @@ client.on('interactionCreate', async (interaction) => {
   }
 
   if (commandName === 'upgrader') {
-    const siteUrl = process.env.UPGRADER_WEBSITE_URL || 'https://entry-coleman-members-affordable.trycloudflare.com';
+    const siteUrl = process.env.UPGRADER_WEBSITE_URL || 'https://lg-economy.onrender.com';
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder()
         .setLabel('Открыть UPGRADER 2.0')
@@ -592,7 +592,7 @@ client.on('messageCreate', async (message) => {
   }
 
   if (cmd === 'upgrader' || cmd === 'сайт') {
-    return message.reply(`🚀 **Официальный Upgrader LG ECONOMY:**\nhttps://entry-coleman-members-affordable.trycloudflare.com`);
+    return message.reply(`🚀 **Официальный Upgrader LG ECONOMY:**\nhttps://lg-economy.onrender.com`);
   }
 
   if (cmd === 'payout') {
