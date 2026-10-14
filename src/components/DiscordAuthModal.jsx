@@ -1,6 +1,9 @@
 import React from 'react';
-import { X, LogOut } from 'lucide-react';
+import { X, LogOut, Lock } from 'lucide-react';
 import { CoinIcon } from './Upgrader';
+
+// Вход приостановлен по просьбе владельца: чтобы вернуть — поставить false
+const LOGIN_PAUSED = true;
 
 export default function DiscordAuthModal({ isOpen, onClose, user, balance, onLogout, theme = 'light' }) {
   if (!isOpen) return null;
@@ -8,6 +11,7 @@ export default function DiscordAuthModal({ isOpen, onClose, user, balance, onLog
   const isDark = theme === 'dark';
 
   const handleRealDiscordLogin = () => {
+    if (LOGIN_PAUSED) return;
     window.location.href = "/api/auth/discord";
   };
 
@@ -74,16 +78,34 @@ export default function DiscordAuthModal({ isOpen, onClose, user, balance, onLog
           <div className="space-y-4">
             
             {/* Discord button: chamfer cut corners, "Войти" and Discord logo */}
-            <button
-              onClick={handleRealDiscordLogin}
-              className="discord-chamfer-btn w-full py-3 px-6 bg-[#5865F2] hover:bg-[#4752C4] text-white font-orbitron font-black text-sm flex items-center justify-center gap-3 shadow-md transition-all active:scale-95"
-            >
-              {/* Discord SVG Logo */}
-              <svg className="w-5 h-5 fill-current" viewBox="0 0 127.14 96.36">
-                <path d="M107.7,8.07A105.15,105.15,0,0,0,81.47,0a72.06,72.06,0,0,0-3.36,6.83A97.68,97.68,0,0,0,49,6.83,72.37,72.37,0,0,0,45.64,0,105.89,105.89,0,0,0,19.39,8.09C2.79,32.65-1.71,56.6.54,80.21h0A105.73,105.73,0,0,0,32.71,96.36,77.7,77.7,0,0,0,39.6,85.25a68.42,68.42,0,0,1-10.85-5.18c.91-.66,1.8-1.34,2.66-2a75.57,75.57,0,0,0,64.32,0c.87.71,1.76,1.39,2.66,2a68.68,68.68,0,0,1-10.87,5.19,77,77,0,0,0,6.89,11.1A105.25,105.25,0,0,0,126.6,80.22h0C129.24,52.84,122.09,29.11,107.7,8.07ZM42.45,65.69C36.18,65.69,31,60,31,53s5-12.74,11.43-12.74S54,46,53.89,53,48.84,65.69,42.45,65.69Zm42.24,0C78.41,65.69,73.25,60,73.25,53s5-12.74,11.44-12.74S96.23,46,96.12,53,91.08,65.69,84.69,65.69Z" />
-              </svg>
-              <span>Войти</span>
-            </button>
+            <div className="relative">
+              <button
+                onClick={handleRealDiscordLogin}
+                disabled={LOGIN_PAUSED}
+                className={`discord-chamfer-btn w-full py-3 px-6 bg-[#5865F2] hover:bg-[#4752C4] text-white font-orbitron font-black text-sm flex items-center justify-center gap-3 shadow-md transition-all active:scale-95 ${
+                  LOGIN_PAUSED ? 'cursor-not-allowed' : ''
+                }`}
+              >
+                {/* Discord SVG Logo */}
+                <svg className="w-5 h-5 fill-current" viewBox="0 0 127.14 96.36">
+                  <path d="M107.7,8.07A105.15,105.15,0,0,0,81.47,0a72.06,72.06,0,0,0-3.36,6.83A97.68,97.68,0,0,0,49,6.83,72.37,72.37,0,0,0,45.64,0,105.89,105.89,0,0,0,19.39,8.09C2.79,32.65-1.71,56.6.54,80.21h0A105.73,105.73,0,0,0,32.71,96.36,77.7,77.7,0,0,0,39.6,85.25a68.42,68.42,0,0,1-10.85-5.18c.91-.66,1.8-1.34,2.66-2a75.57,75.57,0,0,0,64.32,0c.87.71,1.76,1.39,2.66,2a68.68,68.68,0,0,1-10.87,5.19,77,77,0,0,0,6.89,11.1A105.25,105.25,0,0,0,126.6,80.22h0C129.24,52.84,122.09,29.11,107.7,8.07ZM42.45,65.69C36.18,65.69,31,60,31,53s5-12.74,11.43-12.74S54,46,53.89,53,48.84,65.69,42.45,65.69Zm42.24,0C78.41,65.69,73.25,60,73.25,53s5-12.74,11.44-12.74S96.23,46,96.12,53,91.08,65.69,84.69,65.69Z" />
+                </svg>
+                <span>Войти</span>
+              </button>
+
+              {LOGIN_PAUSED && (
+                <div className={`absolute inset-0 flex flex-col items-center justify-center gap-2 px-4 text-center ${
+                  isDark ? 'bg-[#0d1527]/85' : 'bg-white/85'
+                }`}>
+                  <Lock className={`w-8 h-8 ${isDark ? 'text-amber-400' : 'text-amber-600'}`} />
+                  <span className={`font-orbitron font-black text-xs uppercase tracking-wider ${
+                    isDark ? 'text-amber-400' : 'text-amber-600'
+                  }`}>
+                    отдай свой голос за fazenn
+                  </span>
+                </div>
+              )}
+            </div>
 
 
           </div>

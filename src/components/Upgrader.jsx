@@ -334,6 +334,14 @@ export default function Upgrader({
         isDark ? 'bg-[#0a1122]' : 'bg-white'
       } shadow-sm z-20`}>
         <div>
+          {/* Brand mark: same LG ECONOMY logo as in the navbar */}
+          <div className="flex items-center gap-2 pb-3 mb-1">
+            <div className="w-8 h-8 bg-gradient-to-tr from-sky-600 to-blue-700 flex items-center justify-center font-orbitron font-black text-white text-[10px] shadow-sm shrink-0">
+              LG
+            </div>
+            <span className="font-orbitron font-black text-sm tracking-wider">ECONOMY</span>
+          </div>
+
           <div className="pb-3 mb-2 flex items-center justify-between border-b border-sky-500/10">
             <div className="flex items-center gap-1.5">
               <Sparkles className="w-4 h-4 text-sky-400 animate-pulse" />
@@ -346,7 +354,7 @@ export default function Upgrader({
             </span>
           </div>
 
-          <div className="overflow-y-auto max-h-[calc(100vh-160px)] space-y-2 pr-1">
+          <div className="overflow-y-auto max-h-[calc(100vh-215px)] space-y-2 pr-1">
             {realWins.length === 0 ? (
               <div className="text-[11px] font-rajdhani text-slate-400 italic py-6 text-center flex flex-col items-center gap-1">
                 <Trophy className="w-5 h-5 text-slate-500 opacity-40 mb-1" />
