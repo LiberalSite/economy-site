@@ -9,8 +9,11 @@ import {
   RefreshCw,
   Wallet,
   Trophy,
-  Zap
+  Zap,
+  ShoppingCart,
+  X
 } from 'lucide-react';
+import useSpinQuota from '../hooks/useSpinQuota';
 
 const DEFAULT_AVATAR = 'https://cdn.discordapp.com/embed/avatars/0.png';
 
@@ -50,6 +53,14 @@ export default function Upgrader({
   const [lastLostAmount, setLastLostAmount] = useState(0); // Freezes the lost sum
   const [needleAngle, setNeedleAngle] = useState(180); // Starts pointing straight DOWN (180 deg) into the blue zone
   const [result, setResult] = useState(null); // 'win' | 'loss' | null
+  const [showBuy, setShowBuy] = useState(false);
+  const [isBuying, setIsBuying] = useState(false);
+
+  const { quota, pending, refresh: refreshQuota, afterSpin, buyBonus } = useSpinQuota({
+    discordUser,
+    guestBalance: userBalance,
+    onGuestBalance: onUpdateBalance,
+  });
 
   // REAL ONLY: Left side = Real Wins, Right side = Real Losses
   const [realWins, setRealWins] = useState([]);
@@ -75,7 +86,7 @@ export default function Upgrader({
       .catch(e => console.warn('Failed to load upgrader history', e));
   }, []);
 
-  // Presets: x1.5, x2, x3, x5, 25%, 50%, 75%, 90%
+  // Presets: x1.5, x2, x3, x5, 25%, 50%, 75%
   const presetOptions = [
     { label: "x1.5", value: 1.5, chance: 64.00 },
     { label: "x2", value: 2.0, chance: 48.00 },
@@ -84,7 +95,6 @@ export default function Upgrader({
     { label: "25%", value: 3.84, chance: 25.00 },
     { label: "50%", value: 1.92, chance: 50.00 },
     { label: "75%", value: 1.28, chance: 75.00 },
-    { label: "90%", value: 1.07, chance: 90.00 },
   ];
 
   const handleSelectPreset = (opt) => {
@@ -102,7 +112,7 @@ export default function Upgrader({
     }
     let num = parseFloat(val);
     if (isNaN(num)) return;
-    if (num > 90) num = 90;
+    if (num > 75) num = 75;
     if (num < 1) num = 1;
     setWinChance(num);
     const newMult = Number((96 / Math.max(1, num)).toFixed(2));
@@ -159,7 +169,7 @@ export default function Upgrader({
   const circumference = 2 * Math.PI * outerRadius; // ~848.23
 
   // Symmetrical Win Sector at the Bottom (180 deg):
-  const parsedChance = Math.min(90, Math.max(1, parseFloat(winChance) || 1));
+  const parsedChance = Math.min(75, Math.max(1, parseFloat(winChance) || 1));
   const winAngle = (parsedChance / 100) * 360;
   const dashLength = (parsedChance / 100) * circumference;
 
@@ -196,9 +206,17 @@ export default function Upgrader({
     return win ? 180 - half + winAngle * t : (180 + half + (360 - winAngle) * t) % 360;
   };
 
+  const roundsLeft = quota.left + quota.bonusSpins;
+  const outOfRounds = !pending && roundsLeft <= 0;
+
   const spin = async () => {
     if (isSpinning) return;
     if (betAmount <= 0) return;
+    if (outOfRounds) {
+      setShowBuy(true);
+      playSound('click');
+      return;
+    }
     if (betAmount > userBalance) {
       alert("Недостаточно монет на балансе!");
       return;
@@ -225,6 +243,7 @@ export default function Upgrader({
         const data = await res.json();
         if (!data.success) {
           setIsSpinning(false);
+          refreshQuota();
           alert(data.error || 'Ошибка апгрейда');
           return;
         }
@@ -232,6 +251,7 @@ export default function Upgrader({
         currentMult = data.mult;
         currentWin = isWin ? data.amount : 0;
         serverBalance = data.balance;
+        afterSpin(data);
       } catch (e) {
         setIsSpinning(false);
         alert('Сетевая ошибка, попробуйте ещё раз');
@@ -239,6 +259,7 @@ export default function Upgrader({
       }
     } else {
       isWin = Math.random() * 100 < parsedChance;
+      afterSpin(null);
     }
 
     // Realistic mechanical drum sound (5.2s physics curve)
@@ -318,6 +339,30 @@ export default function Upgrader({
       }
     }, spinDurationMs);
   };
+
+  const openShop = () => {
+    if (isSpinning) return;
+    setShowBuy(true);
+    playSound('click');
+  };
+
+  const confirmBuy = async () => {
+    if (isBuying) return;
+    setIsBuying(true);
+    try {
+      await buyBonus();
+      setShowBuy(false);
+      playSound('click');
+    } catch (e) {
+      alert(e.message || 'Не удалось купить спин');
+    } finally {
+      setIsBuying(false);
+    }
+  };
+
+  const resetTimeText = new Date(quota.nextResetAt).toLocaleString('ru-RU', {
+    day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit'
+  });
 
   const isDark = theme === 'dark';
 
@@ -697,22 +742,29 @@ export default function Upgrader({
               </div>
             </div>
 
-            {/* IMPROVE BUTTON (NO RUSSIAN 'АПГРЕЙДИТЬ') */}
+            {/* IMPROVE BUTTON (NO RUSSIAN 'АПГРЕЙДИТЬ') — carries the 24h round counter */}
             <button
-              onClick={spin}
+              onClick={outOfRounds ? openShop : spin}
               disabled={isSpinning || betAmount <= 0}
               className={`w-full max-w-[280px] mt-4 py-3.5 font-orbitron font-black text-xs tracking-widest uppercase transition-all flex items-center justify-center gap-2 shadow-lg active:scale-95 btn-shimmer-sweep ${
                 isSpinning
                   ? 'bg-slate-700 text-slate-400 cursor-not-allowed opacity-80'
-                  : isBigPotential
-                    ? 'bg-gradient-to-r from-amber-500 via-yellow-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-slate-950 shadow-[0_0_20px_rgba(245,158,11,0.4)]'
-                    : 'bg-gradient-to-r from-sky-500 via-sky-600 to-blue-700 hover:from-sky-400 hover:to-blue-600 text-white shadow-[0_0_16px_rgba(2,132,199,0.35)]'
+                  : outOfRounds
+                    ? 'bg-gradient-to-r from-fuchsia-600 via-purple-600 to-indigo-700 hover:from-fuchsia-500 hover:to-indigo-600 text-white shadow-[0_0_16px_rgba(147,51,234,0.4)]'
+                    : isBigPotential
+                      ? 'bg-gradient-to-r from-amber-500 via-yellow-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-slate-950 shadow-[0_0_20px_rgba(245,158,11,0.4)]'
+                      : 'bg-gradient-to-r from-sky-500 via-sky-600 to-blue-700 hover:from-sky-400 hover:to-blue-600 text-white shadow-[0_0_16px_rgba(2,132,199,0.35)]'
               }`}
             >
               {isSpinning ? (
                 <>
                   <RefreshCw className="w-4 h-4 animate-spin" />
                   <span>SPINNING...</span>
+                </>
+              ) : outOfRounds ? (
+                <>
+                  <ShoppingCart className="w-4 h-4" />
+                  <span>КУПИТЬ СПИН</span>
                 </>
               ) : isBigPotential ? (
                 <>
@@ -724,6 +776,14 @@ export default function Upgrader({
                   <ChevronsUp className="w-4 h-4" />
                   <span>IMPROVE</span>
                 </>
+              )}
+              {!isSpinning && !pending && (
+                <span className={`font-mono text-[10px] font-black px-1.5 py-0.5 rounded ${
+                  isBigPotential && !outOfRounds ? 'bg-slate-950/25 text-slate-950' : 'bg-black/25 text-white'
+                }`}>
+                  {quota.left}/{quota.limit}
+                  {quota.bonusSpins > 0 && ` +${quota.bonusSpins}`}
+                </span>
               )}
             </button>
           </div>
@@ -798,13 +858,13 @@ export default function Upgrader({
                 <div className="space-y-1">
                   <div className="flex justify-between items-center text-[10px] font-orbitron font-black text-slate-400 uppercase">
                     <span>Шанс победы:</span>
-                    <span className="text-sky-400">МАКС: 90%</span>
+                    <span className="text-sky-400">МАКС: 75%</span>
                   </div>
                   <div className="relative">
                     <input
                       type="number"
                       min="1"
-                      max="90"
+                      max="75"
                       step="0.1"
                       value={winChance}
                       onChange={(e) => handleChanceInput(e.target.value)}
@@ -922,6 +982,63 @@ export default function Upgrader({
           </div>
         </div>
       </aside>
+
+      {/* SHOP: one extra round for the next reset window */}
+      {showBuy && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm px-4 py-6"
+          onClick={() => setShowBuy(false)}
+        >
+          <div
+            className={`w-full max-w-[340px] p-5 shadow-2xl ${isDark ? 'bg-[#0d1527] text-white' : 'bg-white text-slate-900'}`}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <ShoppingCart className="w-5 h-5 text-fuchsia-400" />
+                <span className="font-orbitron font-black text-sm uppercase tracking-widest">Дополнительный спин</span>
+              </div>
+              <button onClick={() => setShowBuy(false)} className="p-1 -mt-1 -mr-1 opacity-60 hover:opacity-100">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <p className="mt-4 text-[11px] font-rajdhani uppercase tracking-wider text-slate-400 font-bold">
+              Стоимость
+            </p>
+            <div className="flex items-center gap-2 mt-1">
+              <span className="font-orbitron font-black text-2xl text-fuchsia-400">
+                {quota.bonusCost.toLocaleString('ru-RU')}
+              </span>
+              <CoinIcon className="w-5 h-5" />
+            </div>
+
+            <p className={`mt-4 text-xs font-rajdhani leading-relaxed ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
+              Купленный спин сгорает, если не использовать его до следующего ресета
+            </p>
+            <p className="mt-2 text-[10px] font-mono text-slate-400">
+              Ресет: {resetTimeText}
+            </p>
+
+            <div className="mt-5 flex items-center gap-2">
+              <button
+                onClick={confirmBuy}
+                className="flex-1 py-2.5 font-orbitron font-black text-[11px] uppercase tracking-widest text-white bg-gradient-to-r from-fuchsia-600 to-purple-700 hover:from-fuchsia-500 hover:to-purple-600 shadow-lg active:scale-95 transition-all"
+              >
+                Купить
+              </button>
+              <button
+                onClick={() => setShowBuy(false)}
+                className={`flex-1 py-2.5 font-orbitron font-black text-[11px] uppercase tracking-widest active:scale-95 transition-all ${
+                  isDark ? 'bg-[#162343] text-slate-300 hover:bg-[#1b2b52]' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                }`}
+              >
+                Отмена
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

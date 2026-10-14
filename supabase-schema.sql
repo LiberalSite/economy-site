@@ -38,6 +38,8 @@ CREATE TABLE IF NOT EXISTS public.salary_payouts (
 
 -- Upgrades for databases created with the previous schema
 ALTER TABLE public.users ALTER COLUMN username DROP DEFAULT;
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS bonus_spins INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS bonus_expires_at TIMESTAMPTZ;
 ALTER TABLE public.users ALTER COLUMN balance TYPE BIGINT;
 UPDATE public.users SET balance = 0 WHERE balance IS NULL OR balance < 0;
 ALTER TABLE public.users ALTER COLUMN balance SET NOT NULL;
@@ -50,6 +52,7 @@ END $$;
 
 CREATE INDEX IF NOT EXISTS idx_users_balance ON public.users(balance DESC);
 CREATE INDEX IF NOT EXISTS idx_logs_type_ts ON public.logs(type, timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_logs_upgrader_user ON public.logs(discord_id, timestamp DESC) WHERE type = 'upgrader_spin';
 
 -- Lock down: RLS on, no policies → only service_role (which bypasses RLS) can touch data
 ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
@@ -110,6 +113,7 @@ BEGIN
 END $$;
 
 -- Upgrader round resolved entirely on the DB side: multiplier = 96 / chance (4% house edge).
+-- Free quota: 3 rounds per rolling 24h; beyond that only a purchased bonus round can spin.
 CREATE OR REPLACE FUNCTION public.upgrader_spin(
   p_discord_id TEXT, p_bet BIGINT, p_chance NUMERIC,
   p_username TEXT DEFAULT NULL, p_avatar TEXT DEFAULT NULL
@@ -120,9 +124,28 @@ DECLARE
   v_win BOOLEAN;
   v_payout BIGINT;
   v_balance BIGINT;
+  v_used INT;
+  v_bonus INT;
+  v_bonus_expires TIMESTAMPTZ;
+  v_bonus_used BOOLEAN := FALSE;
+  v_window_start TIMESTAMPTZ := NOW() - INTERVAL '24 hours';
 BEGIN
   IF p_bet IS NULL OR p_bet < 1 THEN RAISE EXCEPTION 'INVALID_BET'; END IF;
-  IF p_chance IS NULL OR p_chance < 1 OR p_chance > 90 THEN RAISE EXCEPTION 'INVALID_CHANCE'; END IF;
+  IF p_chance IS NULL OR p_chance < 1 OR p_chance > 75 THEN RAISE EXCEPTION 'INVALID_CHANCE'; END IF;
+
+  SELECT COUNT(*) INTO v_used FROM public.logs
+   WHERE type = 'upgrader_spin' AND discord_id = p_discord_id AND timestamp >= v_window_start;
+
+  IF v_used >= 3 THEN
+    SELECT bonus_spins, bonus_expires_at INTO v_bonus, v_bonus_expires
+      FROM public.users WHERE discord_id = p_discord_id FOR UPDATE;
+    IF COALESCE(v_bonus, 0) > 0 AND v_bonus_expires > NOW() THEN
+      UPDATE public.users SET bonus_spins = bonus_spins - 1 WHERE discord_id = p_discord_id;
+      v_bonus_used := TRUE;
+    ELSE
+      RAISE EXCEPTION 'SPIN_LIMIT_REACHED';
+    END IF;
+  END IF;
 
   v_mult := ROUND(96 / p_chance, 2);
   v_win := random() * 100 < p_chance;
@@ -137,14 +160,85 @@ BEGIN
   INSERT INTO public.logs (type, is_win, "user", discord_id, avatar, bet, mult, amount)
   VALUES ('upgrader_spin', v_win, p_username, p_discord_id, p_avatar, p_bet, v_mult, v_payout);
 
-  RETURN jsonb_build_object('is_win', v_win, 'mult', v_mult, 'amount', v_payout, 'balance', v_balance);
+  RETURN jsonb_build_object('is_win', v_win, 'mult', v_mult, 'amount', v_payout,
+    'balance', v_balance, 'bonus_used', v_bonus_used);
+END $$;
+
+-- Round state for the UI: free rounds left in the rolling 24h window and the bonus round price.
+CREATE OR REPLACE FUNCTION public.upgrader_quota(p_discord_id TEXT)
+RETURNS JSONB
+LANGUAGE plpgsql AS $$
+DECLARE
+  v_window_start TIMESTAMPTZ := NOW() - INTERVAL '24 hours';
+  v_used INT := 0;
+  v_oldest TIMESTAMPTZ;
+  v_balance BIGINT := 0;
+  v_bonus INT := 0;
+  v_bonus_expires TIMESTAMPTZ;
+BEGIN
+  SELECT COUNT(*), MIN(timestamp) INTO v_used, v_oldest FROM public.logs
+   WHERE type = 'upgrader_spin' AND discord_id = p_discord_id AND timestamp >= v_window_start;
+
+  SELECT balance, bonus_spins, bonus_expires_at INTO v_balance, v_bonus, v_bonus_expires
+    FROM public.users WHERE discord_id = p_discord_id;
+
+  IF v_bonus_expires IS NOT NULL AND v_bonus_expires <= NOW() THEN v_bonus := 0; END IF;
+
+  RETURN jsonb_build_object(
+    'limit', 3,
+    'used', v_used,
+    'left', GREATEST(0, 3 - v_used),
+    'next_reset_at', COALESCE(v_oldest + INTERVAL '24 hours', NOW() + INTERVAL '24 hours'),
+    'balance', v_balance,
+    'bonus_spins', v_bonus,
+    'bonus_expires_at', v_bonus_expires,
+    'bonus_cost', GREATEST(1, FLOOR(COALESCE(v_balance, 0) * 0.25)::BIGINT)
+  );
+END $$;
+
+-- Sell one extra round for 25% of the current balance; it burns at the next quota reset.
+CREATE OR REPLACE FUNCTION public.buy_bonus_spin(p_discord_id TEXT)
+RETURNS JSONB
+LANGUAGE plpgsql AS $$
+DECLARE
+  v_window_start TIMESTAMPTZ := NOW() - INTERVAL '24 hours';
+  v_balance BIGINT;
+  v_used INT;
+  v_oldest TIMESTAMPTZ;
+  v_cost BIGINT;
+  v_next_reset TIMESTAMPTZ;
+BEGIN
+  SELECT balance INTO v_balance FROM public.users WHERE discord_id = p_discord_id FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'NO_USER'; END IF;
+
+  SELECT COUNT(*), MIN(timestamp) INTO v_used, v_oldest FROM public.logs
+   WHERE type = 'upgrader_spin' AND discord_id = p_discord_id AND timestamp >= v_window_start;
+  IF v_used < 3 THEN RAISE EXCEPTION 'FREE_ROUNDS_LEFT'; END IF;
+
+  v_cost := GREATEST(1, FLOOR(v_balance * 0.25)::BIGINT);
+  v_next_reset := COALESCE(v_oldest + INTERVAL '24 hours', NOW() + INTERVAL '24 hours');
+
+  UPDATE public.users
+     SET balance = balance - v_cost, bonus_spins = bonus_spins + 1,
+         bonus_expires_at = v_next_reset, updated_at = NOW()
+   WHERE discord_id = p_discord_id AND balance >= v_cost;
+  IF NOT FOUND THEN RAISE EXCEPTION 'INSUFFICIENT_FUNDS'; END IF;
+
+  INSERT INTO public.logs (type, discord_id, amount)
+  VALUES ('bonus_spin_purchase', p_discord_id, v_cost);
+
+  RETURN upgrader_quota(p_discord_id) || jsonb_build_object('cost', v_cost);
 END $$;
 
 REVOKE EXECUTE ON FUNCTION public.add_balances(JSONB) FROM PUBLIC, anon, authenticated;
 REVOKE EXECUTE ON FUNCTION public.transfer_coins(TEXT, TEXT, BIGINT, TEXT, TEXT) FROM PUBLIC, anon, authenticated;
 REVOKE EXECUTE ON FUNCTION public.upgrader_spin(TEXT, BIGINT, NUMERIC, TEXT, TEXT) FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.upgrader_quota(TEXT) FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.buy_bonus_spin(TEXT) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.add_balances(JSONB) TO service_role;
 GRANT EXECUTE ON FUNCTION public.transfer_coins(TEXT, TEXT, BIGINT, TEXT, TEXT) TO service_role;
 GRANT EXECUTE ON FUNCTION public.upgrader_spin(TEXT, BIGINT, NUMERIC, TEXT, TEXT) TO service_role;
+GRANT EXECUTE ON FUNCTION public.upgrader_quota(TEXT) TO service_role;
+GRANT EXECUTE ON FUNCTION public.buy_bonus_spin(TEXT) TO service_role;
 
 NOTIFY pgrst, 'reload schema';

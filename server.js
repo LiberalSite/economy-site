@@ -212,10 +212,49 @@ app.post('/api/upgrader/spin', requireUser, async (req, res) => {
   const bet = toPositiveInt(req.body?.bet);
   const chance = Number(req.body?.chance);
   if (!bet) return res.status(400).json({ error: 'Некорректная ставка' });
-  if (!Number.isFinite(chance) || chance < 1 || chance > 90) return res.status(400).json({ error: 'Шанс должен быть от 1 до 90%' });
+  if (!Number.isFinite(chance) || chance < 1 || chance > 75) return res.status(400).json({ error: 'Шанс должен быть от 1 до 75%' });
   try {
     const r = await db.upgraderSpin(req.user.id, bet, Math.round(chance * 100) / 100, req.user.username, req.user.avatar);
-    res.json({ success: true, isWin: r.is_win, mult: Number(r.mult), amount: r.amount, balance: r.balance });
+    const q = await db.upgraderQuota(req.user.id);
+    res.json({
+      success: true,
+      isWin: r.is_win,
+      mult: Number(r.mult),
+      amount: r.amount,
+      balance: r.balance,
+      bonusUsed: r.bonus_used,
+      ...quotaPayload(q),
+    });
+  } catch (err) {
+    sendDbError(res, err);
+  }
+});
+
+// { limit, used, left, next_reset_at, balance, bonus_spins, bonus_expires_at, bonus_cost } → camelCase for the client
+function quotaPayload(q) {
+  return {
+    spinLimit: q.limit,
+    spinsUsed: q.used,
+    spinsLeft: q.left,
+    nextResetAt: q.next_reset_at,
+    bonusSpins: q.bonus_spins,
+    bonusExpiresAt: q.bonus_expires_at,
+    bonusCost: Number(q.bonus_cost),
+  };
+}
+
+app.get('/api/upgrader/quota', requireUser, async (req, res) => {
+  try {
+    res.json({ success: true, ...quotaPayload(await db.upgraderQuota(req.user.id)) });
+  } catch (err) {
+    sendDbError(res, err);
+  }
+});
+
+app.post('/api/upgrader/buy-spin', requireUser, async (req, res) => {
+  try {
+    const q = await db.buyBonusSpin(req.user.id);
+    res.json({ success: true, cost: Number(q.cost), balance: Number(q.balance), ...quotaPayload(q) });
   } catch (err) {
     sendDbError(res, err);
   }
