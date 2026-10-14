@@ -26,10 +26,12 @@ export default function App() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const authError = params.get('auth_error');
-    if (params.has('auth_success') || authError) {
+    if (params.has('auth_success') || authError || params.has('login_paused')) {
       window.history.replaceState({}, document.title, window.location.pathname);
     }
-    if (authError) {
+    if (params.get('login_paused')) {
+      alert('Вход через Discord временно закрыт — отдай свой голос за fazenn!');
+    } else if (authError) {
       alert('Не удалось войти через Discord. Попробуйте ещё раз.');
     }
 

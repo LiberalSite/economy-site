@@ -95,7 +95,11 @@ function sendDbError(res, err) {
 app.get('/api/health', (req, res) => res.json({ ok: true, db: db.dbConfigured }));
 
 // ─── Discord OAuth ───
+// Вход приостановлен по просьбе владельца: вернуть = false
+const LOGIN_PAUSED = true;
+
 app.get('/api/auth/discord', (req, res) => {
+  if (LOGIN_PAUSED) return res.redirect('/?login_paused=1');
   const state = crypto.randomBytes(16).toString('hex');
   res.cookie(STATE_COOKIE, state, cookieOpts(10 * 60 * 1000));
   const params = new URLSearchParams({
@@ -109,6 +113,7 @@ app.get('/api/auth/discord', (req, res) => {
 });
 
 app.get('/api/auth/callback', async (req, res) => {
+  if (LOGIN_PAUSED) return res.redirect('/?login_paused=1');
   const { code, state } = req.query;
   const expectedState = parseCookies(req.headers.cookie)[STATE_COOKIE];
   res.clearCookie(STATE_COOKIE, { path: '/' });
