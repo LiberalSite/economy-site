@@ -2,24 +2,13 @@ import React from 'react';
 import { X, LogOut } from 'lucide-react';
 import { CoinIcon } from './Upgrader';
 
-export default function DiscordAuthModal({ isOpen, onClose, user, onLogin, onLogout, onSetBalance, theme = 'light' }) {
+export default function DiscordAuthModal({ isOpen, onClose, user, balance, onLogout, theme = 'light' }) {
   if (!isOpen) return null;
 
   const isDark = theme === 'dark';
 
   const handleRealDiscordLogin = () => {
     window.location.href = "/api/auth/discord";
-  };
-
-  const handleDemoLogin = () => {
-    onLogin({
-      id: "782910384729102847",
-      username: "Fazenn_Supporter#2026",
-      avatar: "https://cdn.discordapp.com/embed/avatars/0.png",
-      role: "@[act+10] - Превосходный Актив",
-      balance: 100000
-    });
-    onClose();
   };
 
   return (
@@ -63,7 +52,7 @@ export default function DiscordAuthModal({ isOpen, onClose, user, onLogin, onLog
                   {user.username}
                 </div>
                 <div className="text-[10px] font-mono text-sky-500 font-bold flex items-center gap-1">
-                  <span>{user.balance?.toLocaleString()}</span>
+                  <span>{balance?.toLocaleString()}</span>
                   <CoinIcon className="w-3.5 h-3.5" />
                 </div>
               </div>

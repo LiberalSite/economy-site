@@ -1,86 +1,70 @@
-# ⚡ ПРЕДВЫБОРНЫЙ ПОРТАЛ & ЭКОСИСТЕМА FAZENN 2026
+# LG ECONOMY — сайт + Discord-бот
 
-Официальный Hi-Tech веб-сайт предвыборной кампании кандидата **Fazenn** на пост Лидера группы ЛГ (Выборы: **15/10/2026**).
+Сайт с Upgrader, лидербордом и переводами монет + Discord-бот экономики. Баланс общий: бот и сайт работают с одной базой Supabase.
 
-> **«ПРИНАДЛЕЖНОСТЬ — ЭТО ВЫБОР СТОРОНЫ. НЕЗАВИСИМОСТЬ — ЭТО СВОБОДА СУЖДЕНИЯ.»**
+**Стек:** React + Vite (фронт), Express (API + Discord OAuth), discord.js (бот, в том же процессе), Supabase Postgres (данные), Render.com (хостинг), GitHub (код, автодеплой).
 
----
-
-## 🌟 Ключевые возможности проекта
-
-1. **Футуристический Hi-Tech дизайн в неоново-синих тонах (Cyan / Electric Blue):**
-   - 3D-голографическое интерактивное ядро выборов на Three.js (реагирует на движения курсора и клики).
-   - Анимированные сетки, таймер обратного отсчёта до выборов 15 октября 2026 года.
-   - Интерактивный бета-тест нового дизайна каналов Discord с формой обратной связи.
-   - Сравнение с оппонентами: Fazenn vs «Свободные Демократы» (7 мест бездействия), @bless you, Андрей и Ян.
-
-2. **Полнофункциональный UPGRADER 2.0 монет группы:**
-   - Стильный синий круговой радар со световой стрелкой и неоновыми секторами шанса (от 1% до 90%).
-   - Синтез Hi-Tech звуковых эффектов через Web Audio API (без внешних аудиофайлов).
-   - Вспышки и анимация победного конфетти.
-   - Живая лента последних апгрейдов участников.
-   - Демо-режим + синхронизация реального баланса Discord.
-
-3. **Экономика 11 уровней актива и авто-зарплаты:**
-   - Тарифная сетка ролей: от `@[act+10]` (1000 LC) до `@[act-0]` (0 LC).
-   - Интерактивный калькулятор дохода (за день, неделю, месяц).
-   - Готовый Discord-бот с автоматической выдачей зарплат каждые 24 часа.
-
----
-
-## 🛠️ Запуск на локальном компьютере
-
-1. Установка зависимостей:
-   ```bash
-   npm install
-   ```
-
-2. Запуск локального сервера разработки:
-   ```bash
-   npm run dev
-   ```
-   Сайт откроется по адресу `http://localhost:3000`.
-
-3. Сборка для продакшена:
-   ```bash
-   npm run build
-   ```
-
----
-
-## 🚀 Деплой на GitHub и Vercel
-
-### Шаг 1: Выгрузка в GitHub
-В корневой папке проекта выполните в терминале:
-```bash
-git init
-git add .
-git commit -m "feat: Fazenn election campaign portal and upgrader"
-git branch -M main
-git remote add origin https://github.com/ВАШ_АККАУНТ/ВАШ_РЕПОЗИТОРИЙ.git
-git push -u origin main
 ```
-*(Папка с видео `S/` автоматически добавлена в `.gitignore` и не будет нагружать репозиторий)*.
+server.js          Express: API, вход через Discord, раздача собранного фронта, запуск бота
+lib/db.js          Работа с Supabase (REST + RPC-функции)
+discord-bot/bot.js Бот: /balance /pay /leaderboard /give /payout /roles /setup_roles /upgrader
+src/               React-фронтенд
+supabase-schema.sql Таблицы и функции БД (запускать в Supabase SQL Editor)
+render.yaml        Blueprint для Render
+```
 
-### Шаг 2: Деплой на Vercel (в 1 клик)
-1. Перейдите на [vercel.com](https://vercel.com) и войдите через GitHub.
-2. Нажмите **«Add New Project»** и выберите ваш репозиторий.
-3. В настройках:
-   - Framework Preset: **Vite**
-   - Build Command: `npm run build`
-   - Output Directory: `dist`
-4. *(Опционально)* Во вкладке **Environment Variables** можно добавить:
-   - `DISCORD_CLIENT_ID`
-   - `DISCORD_CLIENT_SECRET`
-   - `DISCORD_REDIRECT_URI` (например `https://ваш-проект.vercel.app/api/auth/callback`)
-   - `SUPABASE_URL` и `SUPABASE_KEY` (для облачной БД)
-5. Нажмите **Deploy** — через минуту сайт будет опубликован!
+Все операции с монетами (перевод, апгрейд, начисления) выполняются атомарно внутри Postgres-функций. Сайт определяет пользователя по подписанной cookie после входа через Discord — клиент не может подменить ID или баланс. Гости играют в Upgrader в демо-режиме с локальными монетами.
 
 ---
 
-## 🗄️ Настройка базы данных Supabase (для синхронизации)
+## 1. Supabase
 
-1. Зарегистрируйтесь бесплатно на [supabase.com](https://supabase.com) и создайте новый проект.
-2. В левом меню откройте **SQL Editor** и вставьте содержимое файла `supabase_schema.sql`.
-3. Нажмите **Run**. Таблицы пользователей, балансов и истории транзакций созданы!
-4. Скопируйте **Project URL** и **anon key** из `Settings -> API` и укажите их в переменных окружения на Vercel и в боте.
+1. Создайте проект на [supabase.com](https://supabase.com).
+2. **SQL Editor → New query** → вставьте весь `supabase-schema.sql` → **Run**. Скрипт можно запускать повторно (он же обновляет старую схему).
+3. **Project Settings → API Keys** скопируйте:
+   - `Project URL` → `SUPABASE_URL`
+   - **secret / service_role** ключ → `SUPABASE_KEY` (не anon/publishable! публичный ключ не будет иметь доступа к данным).
+
+## 2. Discord Developer Portal
+
+[discord.com/developers/applications](https://discord.com/developers/applications) → ваше приложение:
+
+1. **OAuth2 → Redirects** добавьте:
+   - `https://lg-economy.onrender.com/api/auth/callback` (адрес вашего сервиса на Render)
+   - `http://localhost:3000/api/auth/callback` (для локальной разработки)
+2. **OAuth2 → Client Secret → Reset Secret** — возьмите новый `DISCORD_CLIENT_SECRET`.
+3. **Bot → Privileged Gateway Intents**: включите **Server Members Intent** и **Message Content Intent**.
+4. **Bot → Reset Token** → `DISCORD_BOT_TOKEN`.
+5. Пригласите бота: `https://discord.com/oauth2/authorize?client_id=<CLIENT_ID>&permissions=8&scope=bot%20applications.commands`
+
+## 3. Render.com
+
+**Новый сервис:** Dashboard → **New → Blueprint** → выберите GitHub-репозиторий → Render прочитает `render.yaml` и попросит заполнить `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`, `DISCORD_BOT_TOKEN`, `SUPABASE_URL`, `SUPABASE_KEY`. `SESSION_SECRET` сгенерируется сам.
+
+**Уже существующий сервис** (создан вручную): Settings →
+- Build Command: `npm ci --include=dev && npm run build`
+- Start Command: `node server.js`
+- Health Check Path: `/api/health`
+
+и в **Environment** задайте: `NODE_VERSION=22`, `NODE_ENV=production`, `TZ=Europe/Moscow`, `SESSION_SECRET` (длинная случайная строка), плюс 5 ключей выше.
+
+После каждого `git push` в ветку сервиса Render пересобирает сайт автоматически.
+
+**Сон на бесплатном тарифе.** Render усыпляет free-сервис через 15 минут без запросов — бот при этом отключается. Сервер сам пингует себя каждые 10 минут, этого достаточно. Для надёжности можно добавить бесплатный монитор [UptimeRobot](https://uptimerobot.com) на `https://<ваш-сервис>.onrender.com/api/health` с интервалом 5 минут. Если сервис всё же спал в 18:30, зарплаты начислятся при пробуждении (не более одного раза в день на сервер).
+
+Проверка: `https://<ваш-сервис>.onrender.com/api/health` должен вернуть `{"ok":true,"db":true}`.
+
+## Локальный запуск
+
+```bash
+npm install
+cp .env.example .env   # заполните значения
+npm run dev            # http://localhost:3000 (сайт + API, бот НЕ запускается)
+START_BOT=1 npm run dev  # вместе с ботом (не запускайте одновременно с прод-ботом)
+```
+
+Продакшн-режим локально: `npm run build && npm start`.
+
+## Зарплаты
+
+Каждый день в 18:30 (`TZ`) бот начисляет монеты по высшей роли активности `[act+10]` … `[act+3]` (450 … 30 🪙). `/setup_roles` создаёт эти роли, `/payout` — внеочередная выплата (только админы).

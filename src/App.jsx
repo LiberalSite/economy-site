@@ -13,47 +13,39 @@ export default function App() {
   const [userBalance, setUserBalance] = useState(1000);
   const [theme, setTheme] = useState('light');
 
-  // Load saved session, theme and fetch real balance
-  useEffect(() => {
+  const loadGuestBalance = () => {
     try {
-      let activeUser = null;
+      const guestBal = localStorage.getItem('fazenn_guest_balance');
+      setUserBalance(guestBal ? parseInt(guestBal, 10) : 5000);
+    } catch (e) {
+      setUserBalance(5000);
+    }
+  };
 
-      // 1. Check if redirected from Discord OAuth callback
-      const params = new URLSearchParams(window.location.search);
-      if (params.get('auth_success') === 'true' && params.get('user')) {
-        try {
-          activeUser = JSON.parse(decodeURIComponent(params.get('user')));
-          setDiscordUser(activeUser);
-          localStorage.setItem('fazenn_discord_user', JSON.stringify(activeUser));
-          window.history.replaceState({}, document.title, window.location.pathname);
-        } catch (authErr) {
-          console.warn("Failed to parse Discord OAuth user", authErr);
+  // Session from the server-side cookie, then theme
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const authError = params.get('auth_error');
+    if (params.has('auth_success') || authError) {
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+    if (authError) {
+      alert('Не удалось войти через Discord. Попробуйте ещё раз.');
+    }
+
+    fetch('/api/auth/me')
+      .then(res => res.json())
+      .then(data => {
+        if (data.user) {
+          setDiscordUser(data.user);
+          setUserBalance(data.balance ?? 0);
+        } else {
+          loadGuestBalance();
         }
-      } else {
-        const savedUser = localStorage.getItem('fazenn_discord_user');
-        if (savedUser) {
-          activeUser = JSON.parse(savedUser);
-          setDiscordUser(activeUser);
-        }
-      }
+      })
+      .catch(() => loadGuestBalance());
 
-      // 2. If user is logged in, fetch their REAL balance from database / bot
-      if (activeUser?.id) {
-        fetch(`/api/economy/balance?userId=${activeUser.id}`)
-          .then(res => res.json())
-          .then(data => {
-            if (data.success && typeof data.balance === 'number') {
-              setUserBalance(data.balance);
-            }
-          })
-          .catch(err => console.warn("Failed to fetch initial balance:", err));
-      } else {
-        // Guest mode demo balance
-        const guestBal = localStorage.getItem('fazenn_guest_balance');
-        setUserBalance(guestBal ? parseInt(guestBal, 10) : 5000);
-      }
-
-      // 3. Theme setup
+    try {
       const savedTheme = localStorage.getItem('fazenn_theme');
       if (savedTheme) {
         setTheme(savedTheme);
@@ -75,28 +67,16 @@ export default function App() {
     } catch (e) {}
   };
 
+  // Logged-in balances are authoritative on the server; only guest (demo) balances live in localStorage
   const handleUpdateBalance = (newBalance) => {
     setUserBalance((prev) => {
       const updated = typeof newBalance === 'function' ? newBalance(prev) : newBalance;
       const safeVal = Math.max(0, Math.round(updated));
-
-      if (discordUser?.id) {
-        // Sync real balance to database/bot
-        fetch('/api/economy/update', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            userId: discordUser.id,
-            username: discordUser.username,
-            newBalance: safeVal
-          })
-        }).catch(e => console.warn("Failed to sync balance with server:", e));
-      } else {
+      if (!discordUser) {
         try {
           localStorage.setItem('fazenn_guest_balance', safeVal.toString());
         } catch (e) {}
       }
-
       return safeVal;
     });
   };
@@ -108,34 +88,13 @@ export default function App() {
     }
   };
 
-  const handleLogin = (user) => {
-    setDiscordUser(user);
-    try {
-      localStorage.setItem('fazenn_discord_user', JSON.stringify(user));
-    } catch (e) {}
-
-    // Load user's real balance from database
-    fetch(`/api/economy/balance?userId=${user.id}`)
-      .then(res => res.json())
-      .then(data => {
-        if (data.success && typeof data.balance === 'number') {
-          setUserBalance(data.balance);
-        } else {
-          setUserBalance(0);
-        }
-      })
-      .catch(() => setUserBalance(0));
-  };
-
   const handleLogout = () => {
+    fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
     setDiscordUser(null);
     setUserBalance(5000);
     try {
-      localStorage.removeItem('fazenn_discord_user');
       localStorage.setItem('fazenn_guest_balance', '5000');
-    } catch (e) {
-      console.warn("Storage clear failed", e);
-    }
+    } catch (e) {}
   };
 
   const [isSpinning, setIsSpinning] = useState(false);
@@ -165,7 +124,13 @@ export default function App() {
         ) : activeTab === 'leaderboard' ? (
           <Leaderboard theme={theme} />
         ) : activeTab === 'pay' ? (
-          <PayForm theme={theme} onClose={() => setActiveTab('main')} />
+          <PayForm
+            theme={theme}
+            user={discordUser}
+            onOpenAuthModal={() => setIsAuthModalOpen(true)}
+            onBalanceChange={setUserBalance}
+            onClose={() => setActiveTab('main')}
+          />
         ) : (
           <Upgrader
             userBalance={userBalance}
@@ -184,9 +149,8 @@ export default function App() {
         isOpen={isAuthModalOpen}
         onClose={() => setIsAuthModalOpen(false)}
         user={discordUser}
-        onLogin={handleLogin}
+        balance={userBalance}
         onLogout={handleLogout}
-        onSetBalance={(amt) => handleUpdateBalance(amt)}
         theme={theme}
       />
     </div>

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import confetti from 'canvas-confetti';
 import { playSound } from '../utils/audio';
 import AnimatedCounter from './AnimatedCounter';
@@ -55,6 +55,25 @@ export default function Upgrader({
   // REAL ONLY: Left side = Real Wins, Right side = Real Losses
   const [realWins, setRealWins] = useState([]);
   const [realLosses, setRealLosses] = useState([]);
+
+  useEffect(() => {
+    const toItem = (l) => ({
+      id: l.id,
+      user: l.user,
+      bet: l.bet,
+      mult: Number(l.mult),
+      amount: l.amount,
+      time: new Date(l.timestamp).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
+    });
+    fetch('/api/upgrader/history')
+      .then(res => res.json())
+      .then(data => {
+        if (!data.success) return;
+        setRealWins(data.wins.map(toItem));
+        setRealLosses(data.losses.map(toItem));
+      })
+      .catch(e => console.warn('Failed to load upgrader history', e));
+  }, []);
 
   // Presets: x1.5, x2, x3, x5, 25%, 50%, 75%, 90%
   const presetOptions = [
@@ -170,7 +189,14 @@ export default function Upgrader({
   // SPIN FUNCTION: Slower, realistic physics (slow start -> acceleration -> gradual deceleration)
   const spinDurationMs = 5200; // 5.2s for slow start & smooth deceleration
 
-  const spin = () => {
+  // Pick a needle stop well inside the win sector (centered at 180°) or inside the loss arc
+  const pickStopAngle = (win) => {
+    const half = winAngle / 2;
+    const t = 0.1 + Math.random() * 0.8;
+    return win ? 180 - half + winAngle * t : (180 + half + (360 - winAngle) * t) % 360;
+  };
+
+  const spin = async () => {
     if (isSpinning) return;
     if (betAmount <= 0) return;
     if (betAmount > userBalance) {
@@ -180,27 +206,50 @@ export default function Upgrader({
 
     // Freeze current round parameters
     const currentBet = betAmount;
-    const currentMult = multiplier;
-    const currentWin = Math.floor(currentBet * currentMult);
+    let currentMult = multiplier;
+    let currentWin = Math.floor(currentBet * currentMult);
+    let isWin;
+    let serverBalance = null;
 
     setIsSpinning(true);
     setResult(null);
 
+    if (discordUser) {
+      // Real coins: the server decides the outcome and updates the balance atomically
+      try {
+        const res = await fetch('/api/upgrader/spin', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ bet: currentBet, chance: parsedChance })
+        });
+        const data = await res.json();
+        if (!data.success) {
+          setIsSpinning(false);
+          alert(data.error || 'Ошибка апгрейда');
+          return;
+        }
+        isWin = data.isWin;
+        currentMult = data.mult;
+        currentWin = isWin ? data.amount : 0;
+        serverBalance = data.balance;
+      } catch (e) {
+        setIsSpinning(false);
+        alert('Сетевая ошибка, попробуйте ещё раз');
+        return;
+      }
+    } else {
+      isWin = Math.random() * 100 < parsedChance;
+    }
+
     // Realistic mechanical drum sound (5.2s physics curve)
     playSound('spin', spinDurationMs);
 
-    // 8 to 9 full rotations with slow start and deceleration
-    const randomStop = Math.random() * 360;
+    // 8 to 9 full rotations with slow start and deceleration, landing on the decided sector
+    const currentAngle = ((needleAngle % 360) + 360) % 360;
     const extraSpins = (8 + Math.floor(Math.random() * 2)) * 360;
-    const finalAngle = needleAngle + extraSpins + randomStop;
+    const finalAngle = needleAngle + extraSpins + ((pickStopAngle(isWin) - currentAngle + 360) % 360);
 
     setNeedleAngle(finalAngle);
-
-    // Check if the normalized angle is strictly on the win sector
-    const normalized = (finalAngle % 360);
-    const minAngle = 180 - winAngle / 2;
-    const maxAngle = 180 + winAngle / 2;
-    const isWin = normalized >= minAngle && normalized <= maxAngle;
 
     setTimeout(() => {
       setIsSpinning(false);
@@ -209,23 +258,8 @@ export default function Upgrader({
       if (isWin) {
         setResult('win');
         setLastWonAmount(currentWin);
-        const roundProfit = currentWin - currentBet;
-        onUpdateBalance((prev) => prev + roundProfit);
+        onUpdateBalance(serverBalance ?? ((prev) => prev + currentWin - currentBet));
         playSound('win');
-// Record the spin result in the persistent DB
-fetch('/api/upgrader/record', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({
-    isWin: true,
-    user: username,
-    discordId: discordUser ? discordUser.id : null,
-    avatar: discordUser ? discordUser.avatar : null,
-    bet: currentBet,
-    mult: currentMult,
-    amount: currentWin
-  })
-}).catch(e => console.warn('Failed to record win', e));
 
         if (currentWin >= 10000) {
           confetti({
@@ -266,21 +300,7 @@ fetch('/api/upgrader/record', {
         setResult('loss');
         setLastLostAmount(currentBet);
         playSound('loss');
-// Record loss result
-fetch('/api/upgrader/record', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({
-    isWin: false,
-    user: username,
-    discordId: discordUser ? discordUser.id : null,
-    avatar: discordUser ? discordUser.avatar : null,
-    bet: currentBet,
-    mult: currentMult,
-    amount: 0
-  })
-}).catch(e => console.warn('Failed to record loss', e));
-        onUpdateBalance((prev) => prev - currentBet);
+        onUpdateBalance(serverBalance ?? ((prev) => prev - currentBet));
 
         setRealLosses(prev => [
           {
