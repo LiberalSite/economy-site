@@ -1,0 +1,16 @@
+node_modules/
+dist/
+.env
+.env.local
+.env.*.local
+.vercel/
+
+# Ignore large video folder in the workspace
+S/
+*.mp4
+*.avi
+*.mov
+
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
