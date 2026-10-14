@@ -59,6 +59,7 @@ export default function App() {
   }, []);
 
   const toggleTheme = () => {
+    if (isSpinning) return;
     const nextTheme = theme === 'dark' ? 'light' : 'dark';
     setTheme(nextTheme);
     document.body.className = nextTheme === 'dark' ? 'dark-theme' : 'light-theme';
@@ -100,6 +101,11 @@ export default function App() {
   const [isSpinning, setIsSpinning] = useState(false);
   const [leaderboardKey, setLeaderboardKey] = useState(0);
 
+  // Switching tabs unmounts the drum and cuts the spin animation short
+  const changeTab = (tab) => {
+    if (!isSpinning) setActiveTab(tab);
+  };
+
   const scrollToSection = (id) => {
     if (isSpinning) return;
     setActiveTab('main');
@@ -115,7 +121,7 @@ export default function App() {
       {/* Clean Navbar */}
       <Navbar
         activeTab={activeTab}
-        setActiveTab={setActiveTab}
+        setActiveTab={changeTab}
         onScrollTo={scrollToSection}
         user={discordUser}
         onOpenAuthModal={() => !isSpinning && setIsAuthModalOpen(true)}

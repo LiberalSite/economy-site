@@ -50,12 +50,16 @@ export default function Navbar({ activeTab, setActiveTab, onScrollTo, user, onOp
 
           <button
             onClick={() => setActiveTab('upgrader')}
+            disabled={isSpinning}
+            title={isSpinning ? "Дождитесь окончания прокрута" : "Upgrader"}
             className={`px-6 py-2.5 text-xs font-orbitron font-black transition-all flex items-center gap-2 ${
               activeTab === 'upgrader'
                 ? 'bg-sky-600 text-white shadow-sm'
-                : isDark
-                  ? 'text-slate-300 hover:text-white hover:bg-[#1e293b]'
-                  : 'text-slate-700 hover:text-sky-600 hover:bg-white'
+                : isSpinning
+                  ? 'opacity-40 cursor-not-allowed text-slate-500'
+                  : isDark
+                    ? 'text-slate-300 hover:text-white hover:bg-[#1e293b]'
+                    : 'text-slate-700 hover:text-sky-600 hover:bg-white'
             }`}
           >
             <ChevronsUp className="w-4 h-4" />
@@ -109,7 +113,8 @@ export default function Navbar({ activeTab, setActiveTab, onScrollTo, user, onOp
             {!user && (
               <button
                 onClick={onAddCoins}
-                className="ml-2 px-2 py-0.5 bg-sky-600 hover:bg-sky-700 text-white font-mono text-[10px] font-black shadow-sm transition-transform active:scale-90 flex items-center gap-1"
+                disabled={isSpinning}
+                className={`ml-2 px-2 py-0.5 bg-sky-600 hover:bg-sky-700 text-white font-mono text-[10px] font-black shadow-sm transition-transform active:scale-90 flex items-center gap-1 ${isSpinning ? 'opacity-40 cursor-not-allowed hover:bg-sky-600' : ''}`}
                 title="Добавить +25,000 для тестов"
               >
                 <Plus className="w-3 h-3" />
@@ -121,7 +126,10 @@ export default function Navbar({ activeTab, setActiveTab, onScrollTo, user, onOp
           {/* Theme Toggle */}
           <button
             onClick={onToggleTheme}
+            disabled={isSpinning}
             className={`p-2.5 shadow-sm transition-colors ${
+              isSpinning ? 'opacity-40 cursor-not-allowed' : ''
+            } ${
               isDark 
                 ? 'bg-[#0f172a] text-amber-400 hover:bg-[#1e293b]' 
                 : 'bg-sky-50 text-slate-700 hover:bg-sky-100 hover:text-slate-900'

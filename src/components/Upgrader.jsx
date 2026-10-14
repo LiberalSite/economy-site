@@ -12,9 +12,8 @@ import {
   Zap
 } from 'lucide-react';
 
-/**
- * High-tech metallic gold/amber coin icon that replaces all 'LC' text
- */
+const DEFAULT_AVATAR = 'https://cdn.discordapp.com/embed/avatars/0.png';
+
 export function CoinIcon({ className = "w-4 h-4", glow = true }) {
   return (
     <svg 
@@ -60,6 +59,7 @@ export default function Upgrader({
     const toItem = (l) => ({
       id: l.id,
       user: l.user,
+      avatar: l.avatar,
       bet: l.bet,
       mult: Number(l.mult),
       amount: l.amount,
@@ -254,6 +254,7 @@ export default function Upgrader({
     setTimeout(() => {
       setIsSpinning(false);
       const username = discordUser ? discordUser.username : "Вы";
+      const avatar = discordUser ? discordUser.avatar : null;
 
       if (isWin) {
         setResult('win');
@@ -289,12 +290,13 @@ export default function Upgrader({
           {
             id: Date.now(),
             user: username,
+            avatar,
             bet: currentBet,
             mult: currentMult,
             amount: currentWin,
             time: "Только что"
           },
-          ...prev.slice(0, 14)
+          ...prev.slice(0, 29)
         ]);
       } else {
         setResult('loss');
@@ -306,11 +308,12 @@ export default function Upgrader({
           {
             id: Date.now(),
             user: username,
+            avatar,
             bet: currentBet,
             mult: currentMult,
             time: "Только что"
           },
-          ...prev.slice(0, 14)
+          ...prev.slice(0, 29)
         ]);
       }
     }, spinDurationMs);
@@ -322,6 +325,9 @@ export default function Upgrader({
     <div className={`relative w-full h-[calc(100vh-80px)] flex items-center justify-between overflow-hidden ${
       isDark ? 'bg-[#060b17] text-white' : 'bg-[#f0f6fc] text-slate-900'
     } select-none`}>
+      
+      {/* Spin lock: swallow every click while the drum is running */}
+      {isSpinning && <div className="absolute inset-0 z-30 cursor-wait" onClick={(e) => e.stopPropagation()} />}
       
       {/* 1. LEFT COLUMN: REAL WINS ONLY */}
       <aside className={`w-64 shrink-0 h-full p-4 flex flex-col justify-between ${
@@ -362,12 +368,19 @@ export default function Upgrader({
                           : 'bg-sky-50/80 hover:bg-sky-100/80'
                     }`}
                   >
-                    <div>
-                      <div className="text-xs font-orbitron font-black truncate max-w-[100px]">{item.user}</div>
-                      <div className="text-[10px] font-rajdhani text-slate-400 flex items-center gap-1.5 mt-0.5">
-                        <span>{item.time}</span>
-                        <span>•</span>
-                        <span className="text-sky-400 font-mono font-bold">x{item.mult.toFixed(2)}</span>
+                    <div className="flex items-center gap-2 min-w-0">
+                      <img
+                        src={item.avatar || DEFAULT_AVATAR}
+                        alt={item.user}
+                        className="w-7 h-7 shrink-0 rounded-full shadow-sm"
+                      />
+                      <div className="min-w-0">
+                        <div className="text-xs font-orbitron font-black truncate max-w-[92px]">{item.user}</div>
+                        <div className="text-[10px] font-rajdhani text-slate-400 flex items-center gap-1.5 mt-0.5">
+                          <span>{item.time}</span>
+                          <span>•</span>
+                          <span className="text-sky-400 font-mono font-bold">x{item.mult.toFixed(2)}</span>
+                        </div>
                       </div>
                     </div>
                     <div className="flex items-center gap-1">
@@ -877,12 +890,19 @@ export default function Upgrader({
                           : 'bg-rose-50/80 hover:bg-rose-100/80'
                     }`}
                   >
-                    <div>
-                      <div className="text-xs font-orbitron font-black truncate max-w-[100px]">{item.user}</div>
-                      <div className="text-[10px] font-rajdhani text-slate-400 flex items-center gap-1.5 mt-0.5">
-                        <span>{item.time}</span>
-                        <span>•</span>
-                        <span className="text-slate-400 font-mono font-bold">x{item.mult.toFixed(2)}</span>
+                    <div className="flex items-center gap-2 min-w-0">
+                      <img
+                        src={item.avatar || DEFAULT_AVATAR}
+                        alt={item.user}
+                        className="w-7 h-7 shrink-0 rounded-full shadow-sm"
+                      />
+                      <div className="min-w-0">
+                        <div className="text-xs font-orbitron font-black truncate max-w-[92px]">{item.user}</div>
+                        <div className="text-[10px] font-rajdhani text-slate-400 flex items-center gap-1.5 mt-0.5">
+                          <span>{item.time}</span>
+                          <span>•</span>
+                          <span className="text-slate-400 font-mono font-bold">x{item.mult.toFixed(2)}</span>
+                        </div>
                       </div>
                     </div>
                     <div className="flex items-center gap-1">

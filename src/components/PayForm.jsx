@@ -69,7 +69,11 @@ export default function PayForm({ theme, user, onOpenAuthModal, onBalanceChange,
       <h2 className="text-xl font-orbitron font-black mb-4">Перевести деньги</h2>
       <form onSubmit={handleSubmit} className="space-y-4">
         <select
-          className="w-full p-2 border rounded bg-slate-50 text-slate-900"
+          className={`w-full p-2 border rounded outline-none transition-colors ${
+            isDark
+              ? 'bg-[#15203b] text-white border-slate-700 focus:bg-[#1a294d]'
+              : 'bg-slate-50 text-slate-900 border-slate-300 focus:bg-white'
+          }`}
           value={targetId}
           onChange={e => setTargetId(e.target.value)}
           required
@@ -86,7 +90,11 @@ export default function PayForm({ theme, user, onOpenAuthModal, onBalanceChange,
           min="1"
           step="1"
           placeholder="Сумма"
-          className="w-full p-2 border rounded bg-slate-50 text-slate-900"
+          className={`w-full p-2 border rounded outline-none transition-colors ${
+            isDark
+              ? 'bg-[#15203b] text-white border-slate-700 focus:bg-[#1a294d] placeholder-slate-500'
+              : 'bg-slate-50 text-slate-900 border-slate-300 focus:bg-white'
+          }`}
           value={amount}
           onChange={e => setAmount(e.target.value)}
           required

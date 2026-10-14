@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { CoinIcon } from './Upgrader';
 
 export default function Leaderboard({ theme, refreshKey }) {
   const [users, setUsers] = useState([]);
@@ -20,7 +21,7 @@ export default function Leaderboard({ theme, refreshKey }) {
       <h2 className="text-xl font-orbitron font-black mb-4">Лидерборд</h2>
       <ul className="space-y-2 max-h-[520px] overflow-y-auto pr-1">
         {users.map((u, i) => (
-          <li key={u.id} className="flex items-center gap-3 p-2 bg-slate-100/30 rounded">
+          <li key={u.id} className={`flex items-center gap-3 p-2 rounded ${isDark ? 'bg-[#121c35]' : 'bg-slate-100/60'}`}>
             <span className="w-6 text-right font-mono font-bold text-sky-500">{i + 1}</span>
             <img
               src={u.avatar || 'https://cdn.discordapp.com/embed/avatars/0.png'}
@@ -28,7 +29,10 @@ export default function Leaderboard({ theme, refreshKey }) {
               className="w-8 h-8 rounded-full"
             />
             <span className="flex-1 font-orbitron truncate">{u.username}</span>
-            <span className="font-orbitron font-black">{u.balance?.toLocaleString('ru-RU')} <span className="text-sm">💰</span></span>
+            <span className="font-orbitron font-black flex items-center gap-1.5">
+              <span>{u.balance?.toLocaleString('ru-RU')}</span>
+              <CoinIcon className="w-4 h-4" />
+            </span>
           </li>
         ))}
         {users.length === 0 && <li className="text-gray-500">{error || 'Нет данных'}</li>}
