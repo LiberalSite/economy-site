@@ -322,7 +322,7 @@ export default function Upgrader({
   const isDark = theme === 'dark';
 
   return (
-    <div className={`relative w-full h-[calc(100vh-80px)] flex items-center justify-between overflow-hidden ${
+    <div className={`relative w-full flex-1 flex flex-col lg:flex-row lg:h-[calc(100svh-80px)] lg:items-stretch lg:justify-between overflow-x-hidden lg:overflow-hidden ${
       isDark ? 'bg-[#060b17] text-white' : 'bg-[#f0f6fc] text-slate-900'
     } select-none`}>
       
@@ -330,8 +330,8 @@ export default function Upgrader({
       {isSpinning && <div className="absolute inset-0 z-30 cursor-wait" onClick={(e) => e.stopPropagation()} />}
       
       {/* 1. LEFT COLUMN: REAL WINS ONLY */}
-      <aside className={`w-64 shrink-0 h-full p-4 flex flex-col justify-between ${
-        isDark ? 'bg-[#0a1122]' : 'bg-white'
+      <aside className={`w-full lg:w-64 shrink-0 p-4 flex flex-col justify-between border-b lg:border-b-0 lg:border-r ${
+        isDark ? 'bg-[#0a1122] border-slate-800/60' : 'bg-white border-slate-200'
       } shadow-sm z-20`}>
         <div>
           <div className="pb-3 mb-2 flex items-center justify-between border-b border-sky-500/10">
@@ -346,7 +346,7 @@ export default function Upgrader({
             </span>
           </div>
 
-          <div className="overflow-y-auto max-h-[calc(100vh-160px)] space-y-2 pr-1">
+          <div className="overflow-y-auto max-h-[300px] lg:max-h-[calc(100svh-160px)] space-y-2 pr-1">
             {realWins.length === 0 ? (
               <div className="text-[11px] font-rajdhani text-slate-400 italic py-6 text-center flex flex-col items-center gap-1">
                 <Trophy className="w-5 h-5 text-slate-500 opacity-40 mb-1" />
@@ -402,14 +402,14 @@ export default function Upgrader({
       </aside>
 
       {/* 2. EXACT CENTER: DRUM & CLEAN STAKE / WIN PANELS */}
-      <div className="flex-1 h-full flex flex-col items-center justify-center p-4">
+      <div className="flex-1 order-first lg:order-none flex flex-col items-center justify-center px-3 pt-3 pb-6 lg:p-4">
         
-        <div className="w-full max-w-5xl grid grid-cols-1 lg:grid-cols-12 gap-6 items-center">
+        <div className="w-full max-w-5xl grid grid-cols-1 lg:grid-cols-12 gap-4 lg:gap-6 items-center">
           
           {/* ======================================================== */}
           {/* LEFT BLOCK: STAKE CARD (COIN ICON INSTEAD OF LC)        */}
           {/* ======================================================== */}
-          <div className={`lg:col-span-4 shadow-sm flex flex-col justify-between h-[390px] transition-all duration-300 ${
+          <div className={`lg:col-span-4 shadow-sm flex flex-col justify-between lg:h-[390px] transition-all duration-300 ${
             isDark ? 'bg-[#0d1527]' : 'bg-white'
           } ${isBigBet ? 'shadow-[0_0_20px_rgba(245,158,11,0.15)]' : ''}`}>
             
@@ -420,7 +420,7 @@ export default function Upgrader({
                 : 'bg-gradient-to-r from-sky-500 to-blue-600'
             }`} />
 
-            <div className="p-5 flex-1 flex flex-col justify-between">
+            <div className="px-3 py-3 sm:p-5 flex-1 flex flex-col justify-between">
               
               {/* Card Header */}
               <div>
@@ -547,7 +547,7 @@ export default function Upgrader({
           <div className="lg:col-span-4 flex flex-col items-center justify-center">
             
             {/* Drum Stage */}
-            <div className="relative w-[310px] h-[310px] flex items-center justify-center select-none">
+            <div className="relative w-[310px] max-w-full aspect-square flex items-center justify-center select-none">
               
               {/* SVG DRUM WHEEL */}
               <svg className="w-full h-full overflow-visible" viewBox="0 0 350 350">
@@ -731,7 +731,7 @@ export default function Upgrader({
           {/* ======================================================== */}
           {/* RIGHT BLOCK: WIN CARD (COIN ICON INSTEAD OF LC)         */}
           {/* ======================================================== */}
-          <div className={`lg:col-span-4 shadow-sm flex flex-col justify-between h-[390px] transition-all duration-300 ${
+          <div className={`lg:col-span-4 shadow-sm flex flex-col justify-between lg:h-[390px] transition-all duration-300 ${
             isDark ? 'bg-[#0d1527]' : 'bg-white'
           } ${isBigPotential ? 'shadow-[0_0_25px_rgba(245,158,11,0.2)]' : ''}`}>
             
@@ -742,7 +742,7 @@ export default function Upgrader({
                 : 'bg-gradient-to-r from-emerald-500 to-teal-500'
             }`} />
 
-            <div className="p-5 flex-1 flex flex-col justify-between">
+            <div className="px-3 py-3 sm:p-5 flex-1 flex flex-col justify-between">
               
               {/* Card Header */}
               <div>
@@ -852,8 +852,8 @@ export default function Upgrader({
       </div>
 
       {/* 3. RIGHT COLUMN: REAL LOSSES ONLY */}
-      <aside className={`w-64 shrink-0 h-full p-4 flex flex-col justify-between ${
-        isDark ? 'bg-[#0a1122]' : 'bg-white'
+      <aside className={`w-full lg:w-64 shrink-0 p-4 flex flex-col justify-between border-t lg:border-t-0 lg:border-l ${
+        isDark ? 'bg-[#0a1122] border-slate-800/60' : 'bg-white border-slate-200'
       } shadow-sm z-20`}>
         <div>
           <div className="pb-3 mb-2 flex items-center justify-between border-b border-rose-500/10">
@@ -868,7 +868,7 @@ export default function Upgrader({
             </span>
           </div>
 
-          <div className="overflow-y-auto max-h-[calc(100vh-160px)] space-y-2 pr-1">
+          <div className="overflow-y-auto max-h-[300px] lg:max-h-[calc(100svh-160px)] space-y-2 pr-1">
             {realLosses.length === 0 ? (
               <div className="text-[11px] font-rajdhani text-slate-400 italic py-6 text-center flex flex-col items-center gap-1">
                 <ChevronsDown className="w-5 h-5 text-slate-500 opacity-40 mb-1" />

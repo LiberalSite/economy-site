@@ -139,11 +139,11 @@ export default function App() {
         {activeTab === 'main' ? (
           <>
             <HeroSection theme={theme} onScrollDown={() => scrollToSection('leaderboard')} />
-            <section className="w-full max-w-6xl mx-auto px-4 py-16 grid gap-6 lg:grid-cols-[3fr_2fr] items-start">
-              <div id="leaderboard" className="scroll-mt-24">
+            <section className="w-full max-w-6xl mx-auto px-3 sm:px-4 py-10 sm:py-16 grid gap-6 lg:grid-cols-[3fr_2fr] items-start">
+              <div id="leaderboard" className="scroll-mt-[150px] lg:scroll-mt-24">
                 <Leaderboard theme={theme} refreshKey={leaderboardKey} />
               </div>
-              <div id="pay" className="scroll-mt-24">
+              <div id="pay" className="scroll-mt-[150px] lg:scroll-mt-24">
                 <PayForm
                   theme={theme}
                   user={discordUser}

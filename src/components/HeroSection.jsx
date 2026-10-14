@@ -4,7 +4,7 @@ import HeroHologram from './3d/HeroHologram';
 
 export default function HeroSection({ theme = 'dark', onScrollDown }) {
   return (
-    <section className="relative w-full h-[calc(100vh-80px)] overflow-hidden">
+    <section className="relative w-full h-[75svh] min-h-[380px] lg:h-[calc(100svh-80px)] lg:min-h-0 overflow-hidden">
       {/* Pure Minimalist 3D Cybernetic Core, zero text, zero borders */}
       <HeroHologram theme={theme} />
 
