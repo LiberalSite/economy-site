@@ -60,6 +60,8 @@ export default function Navbar({ activeTab, setActiveTab, user, onOpenAuthModal,
           >
             <ChevronsUp className="w-4 h-4" />
             <span>UPGRADER</span>
+          </button>
+
           {/* Leaderboard button */}
           <button
             onClick={() => setActiveTab('leaderboard')}
@@ -73,6 +75,7 @@ export default function Navbar({ activeTab, setActiveTab, user, onOpenAuthModal,
           >
             <span>LEADERBOARD</span>
           </button>
+
           {/* Pay button */}
           <button
             onClick={() => setActiveTab('pay')}
@@ -86,6 +89,7 @@ export default function Navbar({ activeTab, setActiveTab, user, onOpenAuthModal,
           >
             <span>PAY</span>
           </button>
+        </nav>
 
         {/* Right side: Balance with instant +25,000 top up, Dark Theme Toggle, Discord Button */}
         <div className="flex items-center gap-3">
