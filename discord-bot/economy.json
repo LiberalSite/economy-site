@@ -9,6 +9,18 @@
   },
   "logs": [
     {
+      "id": 1791989232228,
+      "type": "upgrader_spin",
+      "isWin": false,
+      "user": "Вы",
+      "discordId": null,
+      "avatar": null,
+      "bet": 100,
+      "mult": 2,
+      "amount": 0,
+      "timestamp": "2026-10-14T14:47:11.737Z"
+    },
+    {
       "id": 1791984223478,
       "type": "upgrader_spin",
       "isWin": false,

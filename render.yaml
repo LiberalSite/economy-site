@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: lg-economy
+    runtime: node
+    plan: free
+    buildCommand: npm install && cd discord-bot && npm install && cd .. && npm run build
+    startCommand: node server.js
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      - key: DISCORD_CLIENT_ID
+        sync: false
+      - key: DISCORD_CLIENT_SECRET
+        sync: false
+      - key: DISCORD_BOT_TOKEN
+        sync: false
