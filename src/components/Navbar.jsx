@@ -4,7 +4,7 @@ import { LogIn, ChevronsUp, Globe, Moon, Sun, Plus } from 'lucide-react';
 import AnimatedCounter from './AnimatedCounter';
 import { CoinIcon } from './Upgrader';
 
-export default function Navbar({ activeTab, setActiveTab, user, onOpenAuthModal, userBalance, onAddCoins, theme, onToggleTheme, isSpinning = false }) {
+export default function Navbar({ activeTab, setActiveTab, onScrollTo, user, onOpenAuthModal, userBalance, onAddCoins, theme, onToggleTheme, isSpinning = false }) {
   const isDark = theme === 'dark';
 
   return (
@@ -64,10 +64,11 @@ export default function Navbar({ activeTab, setActiveTab, user, onOpenAuthModal,
 
           {/* Leaderboard button */}
           <button
-            onClick={() => setActiveTab('leaderboard')}
+            onClick={() => onScrollTo('leaderboard')}
+            disabled={isSpinning}
             className={`px-6 py-2.5 text-xs font-orbitron font-black transition-all flex items-center gap-2 ${
-              activeTab === 'leaderboard'
-                ? 'bg-sky-600 text-white shadow-sm'
+              isSpinning
+                ? 'opacity-40 cursor-not-allowed text-slate-500'
                 : isDark
                   ? 'text-slate-300 hover:text-white hover:bg-[#1e293b]'
                   : 'text-slate-700 hover:text-sky-600 hover:bg-white'
@@ -78,10 +79,11 @@ export default function Navbar({ activeTab, setActiveTab, user, onOpenAuthModal,
 
           {/* Pay button */}
           <button
-            onClick={() => setActiveTab('pay')}
+            onClick={() => onScrollTo('pay')}
+            disabled={isSpinning}
             className={`px-6 py-2.5 text-xs font-orbitron font-black transition-all flex items-center gap-2 ${
-              activeTab === 'pay'
-                ? 'bg-sky-600 text-white shadow-sm'
+              isSpinning
+                ? 'opacity-40 cursor-not-allowed text-slate-500'
                 : isDark
                   ? 'text-slate-300 hover:text-white hover:bg-[#1e293b]'
                   : 'text-slate-700 hover:text-sky-600 hover:bg-white'

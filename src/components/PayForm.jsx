@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 
-export default function PayForm({ theme, user, onOpenAuthModal, onBalanceChange, onClose }) {
+export default function PayForm({ theme, user, onOpenAuthModal, onBalanceChange, onPaid }) {
   const [users, setUsers] = useState([]);
   const [targetId, setTargetId] = useState('');
   const [amount, setAmount] = useState('');
@@ -36,6 +36,7 @@ export default function PayForm({ theme, user, onOpenAuthModal, onBalanceChange,
         setMessage({ type: 'success', text: 'Перевод выполнен' });
         setAmount('');
         loadUsers();
+        onPaid?.();
       } else {
         setMessage({ type: 'error', text: data.error || 'Ошибка перевода' });
       }
@@ -48,7 +49,7 @@ export default function PayForm({ theme, user, onOpenAuthModal, onBalanceChange,
 
   if (!user) {
     return (
-      <div className={`p-6 mt-8 ${isDark ? 'bg-[#0a1122] text-white' : 'bg-white'} rounded-md shadow-lg w-full max-w-md mx-auto text-center space-y-4`}>
+      <div className={`p-6 ${isDark ? 'bg-[#0a1122] text-white' : 'bg-white'} rounded-md shadow-lg w-full text-center space-y-4`}>
         <h2 className="text-xl font-orbitron font-black">Перевести деньги</h2>
         <p className="text-sm opacity-70">Переводы доступны только после входа через Discord.</p>
         <button
@@ -64,7 +65,7 @@ export default function PayForm({ theme, user, onOpenAuthModal, onBalanceChange,
   const recipients = users.filter(u => u.id !== user.id);
 
   return (
-    <div className={`p-6 mt-8 ${isDark ? 'bg-[#0a1122] text-white' : 'bg-white'} rounded-md shadow-lg w-full max-w-md mx-auto`}>
+    <div className={`p-6 ${isDark ? 'bg-[#0a1122] text-white' : 'bg-white'} rounded-md shadow-lg w-full`}>
       <h2 className="text-xl font-orbitron font-black mb-4">Перевести деньги</h2>
       <form onSubmit={handleSubmit} className="space-y-4">
         <select
@@ -102,13 +103,6 @@ export default function PayForm({ theme, user, onOpenAuthModal, onBalanceChange,
             {message.text}
           </div>
         )}
-        <button
-          type="button"
-          onClick={onClose}
-          className="w-full py-2 bg-gray-500 hover:bg-gray-600 text-white font-orbitron font-black mt-2"
-        >
-          Закрыть
-        </button>
       </form>
     </div>
   );

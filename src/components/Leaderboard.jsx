@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 
-export default function Leaderboard({ theme }) {
+export default function Leaderboard({ theme, refreshKey }) {
   const [users, setUsers] = useState([]);
   const [error, setError] = useState(null);
   const isDark = theme === 'dark';
@@ -13,12 +13,12 @@ export default function Leaderboard({ theme }) {
         else setError(data.error || 'Не удалось загрузить лидерборд');
       })
       .catch(() => setError('Сетевая ошибка'));
-  }, []);
+  }, [refreshKey]);
 
   return (
-    <div className={`p-4 mt-8 ${isDark ? 'bg-[#0a1122] text-white' : 'bg-white'} rounded-md shadow-lg w-full max-w-3xl mx-auto`}>
+    <div className={`p-4 ${isDark ? 'bg-[#0a1122] text-white' : 'bg-white'} rounded-md shadow-lg w-full`}>
       <h2 className="text-xl font-orbitron font-black mb-4">Лидерборд</h2>
-      <ul className="space-y-2">
+      <ul className="space-y-2 max-h-[520px] overflow-y-auto pr-1">
         {users.map((u, i) => (
           <li key={u.id} className="flex items-center gap-3 p-2 bg-slate-100/30 rounded">
             <span className="w-6 text-right font-mono font-bold text-sky-500">{i + 1}</span>

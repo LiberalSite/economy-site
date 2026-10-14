@@ -98,6 +98,14 @@ export default function App() {
   };
 
   const [isSpinning, setIsSpinning] = useState(false);
+  const [leaderboardKey, setLeaderboardKey] = useState(0);
+
+  const scrollToSection = (id) => {
+    if (isSpinning) return;
+    setActiveTab('main');
+    // wait for the main page to render if we came from another tab
+    setTimeout(() => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' }), 50);
+  };
 
   return (
     <div className={`min-h-screen flex flex-col select-none transition-colors duration-200 ${
@@ -108,6 +116,7 @@ export default function App() {
       <Navbar
         activeTab={activeTab}
         setActiveTab={setActiveTab}
+        onScrollTo={scrollToSection}
         user={discordUser}
         onOpenAuthModal={() => !isSpinning && setIsAuthModalOpen(true)}
         userBalance={userBalance}
@@ -120,17 +129,23 @@ export default function App() {
       {/* Main Screen: Planet or Centered Upgrader */}
       <main className="flex-1 flex flex-col">
         {activeTab === 'main' ? (
-          <HeroSection theme={theme} />
-        ) : activeTab === 'leaderboard' ? (
-          <Leaderboard theme={theme} />
-        ) : activeTab === 'pay' ? (
-          <PayForm
-            theme={theme}
-            user={discordUser}
-            onOpenAuthModal={() => setIsAuthModalOpen(true)}
-            onBalanceChange={setUserBalance}
-            onClose={() => setActiveTab('main')}
-          />
+          <>
+            <HeroSection theme={theme} onScrollDown={() => scrollToSection('leaderboard')} />
+            <section className="w-full max-w-6xl mx-auto px-4 py-16 grid gap-6 lg:grid-cols-[3fr_2fr] items-start">
+              <div id="leaderboard" className="scroll-mt-24">
+                <Leaderboard theme={theme} refreshKey={leaderboardKey} />
+              </div>
+              <div id="pay" className="scroll-mt-24">
+                <PayForm
+                  theme={theme}
+                  user={discordUser}
+                  onOpenAuthModal={() => setIsAuthModalOpen(true)}
+                  onBalanceChange={setUserBalance}
+                  onPaid={() => setLeaderboardKey((k) => k + 1)}
+                />
+              </div>
+            </section>
+          </>
         ) : (
           <Upgrader
             userBalance={userBalance}
