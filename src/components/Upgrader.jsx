@@ -518,7 +518,7 @@ export default function Upgrader({
                   fill="transparent"
                 />
 
-                {/* 3. Dynamic Sector: Smooth color transition without blinking or filter flicker */}
+                {/* 3. Dynamic Sector: Smooth arc resize animation & smooth color morphing */}
                 <circle
                   cx={cx}
                   cy={cy}
@@ -532,7 +532,7 @@ export default function Upgrader({
                   fill="none"
                   style={{
                     filter: `drop-shadow(0 0 12px ${drumColor})`,
-                    transition: 'stroke 0.6s ease, filter 0.6s ease',
+                    transition: 'stroke-dasharray 0.4s cubic-bezier(0.4, 0, 0.2, 1), transform 0.4s cubic-bezier(0.4, 0, 0.2, 1), stroke 0.6s ease, filter 0.6s ease',
                   }}
                 />
               </svg>

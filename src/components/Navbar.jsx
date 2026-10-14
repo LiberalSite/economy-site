@@ -13,16 +13,16 @@ export default function Navbar({ activeTab, setActiveTab, user, onOpenAuthModal,
     }`}>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between">
         
-        {/* Brand Logo */}
+        {/* Brand Logo: LG ECONOMY */}
         <div 
           onClick={() => !isSpinning && setActiveTab('main')}
           className={`flex items-center gap-3 select-none ${isSpinning ? 'cursor-not-allowed opacity-70' : 'cursor-pointer'}`}
         >
-          <div className="w-10 h-10 bg-gradient-to-tr from-sky-600 to-blue-700 flex items-center justify-center font-orbitron font-black text-white text-lg shadow-sm">
-            F
+          <div className="w-10 h-10 bg-gradient-to-tr from-sky-600 to-blue-700 flex items-center justify-center font-orbitron font-black text-white text-sm shadow-sm">
+            LG
           </div>
-          <span className="font-orbitron font-black text-2xl tracking-wider">
-            FAZENN
+          <span className="font-orbitron font-black text-xl sm:text-2xl tracking-wider">
+            LG ECONOMY
           </span>
         </div>
 
