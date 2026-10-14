@@ -78,14 +78,29 @@ ALTER TABLE public.users ALTER COLUMN username DROP DEFAULT;
 ALTER TABLE public.users ADD COLUMN IF NOT EXISTS bonus_spins INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE public.users ADD COLUMN IF NOT EXISTS bonus_expires_at TIMESTAMPTZ;
 ALTER TABLE public.users ALTER COLUMN balance TYPE BIGINT;
-UPDATE public.users SET balance = 0 WHERE balance IS NULL OR balance < 0;
+UPDATE public.users SET balance = 0 WHERE balance IS NULL;
 ALTER TABLE public.users ALTER COLUMN balance SET NOT NULL;
 ALTER TABLE public.logs ALTER COLUMN bet TYPE BIGINT;
 ALTER TABLE public.logs ALTER COLUMN amount TYPE BIGINT;
 ALTER TABLE public.logs ADD COLUMN IF NOT EXISTS fee BIGINT DEFAULT 0;
 -- Loan interest is charged every day straight from the balance, so a borrower can end up in the
--- minus on purpose. The old non-negative check would block that.
-ALTER TABLE public.users DROP CONSTRAINT IF EXISTS users_balance_non_negative;
+-- minus on purpose. Drop any check that forbids a negative balance, whatever Supabase named it.
+DO $do$
+DECLARE
+  c RECORD;
+BEGIN
+  FOR c IN
+    SELECT con.conname AS n
+      FROM pg_constraint con
+      JOIN pg_class rel ON rel.oid = con.conrelid
+      JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace
+     WHERE nsp.nspname = 'public' AND rel.relname = 'users' AND con.contype = 'c'
+       AND pg_get_constraintdef(con.oid) ILIKE '%balance%'
+  LOOP
+    EXECUTE format('ALTER TABLE public.users DROP CONSTRAINT %I', c.n);
+  END LOOP;
+END
+$do$;
 
 CREATE INDEX IF NOT EXISTS idx_users_balance ON public.users(balance DESC);
 CREATE INDEX IF NOT EXISTS idx_logs_type_ts ON public.logs(type, timestamp DESC);
@@ -333,6 +348,7 @@ DECLARE
   v_current_bonus INT;
   v_current_expires TIMESTAMPTZ;
   v_cost BIGINT;
+  v_costs BIGINT[];
   v_next_reset TIMESTAMPTZ;
 BEGIN
   IF p_count IS NULL OR p_count < 1 OR p_count > 3 THEN RAISE EXCEPTION 'INVALID_COUNT'; END IF;
@@ -345,7 +361,8 @@ BEGIN
    WHERE type = 'upgrader_spin' AND discord_id = p_discord_id AND timestamp >= v_window_start;
   IF v_used < 3 THEN RAISE EXCEPTION 'FREE_ROUNDS_LEFT'; END IF;
 
-  v_cost := bonus_costs(v_balance)[p_count];
+  v_costs := public.bonus_costs(v_balance);
+  v_cost := v_costs[p_count];
   v_next_reset := COALESCE(v_oldest + INTERVAL '24 hours', NOW() + INTERVAL '24 hours');
 
   UPDATE public.users
