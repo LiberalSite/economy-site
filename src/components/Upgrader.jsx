@@ -17,6 +17,12 @@ import useSpinQuota from '../hooks/useSpinQuota';
 
 const DEFAULT_AVATAR = 'https://cdn.discordapp.com/embed/avatars/0.png';
 
+export const MAX_BET = 9999999999; // 10 digits
+const clampBet = (v) => Math.min(Math.max(1, Math.floor(v) || 1), MAX_BET);
+
+// The feed columns are narrow: long sums shrink instead of pushing the avatar, name and coin out of line
+const sumSizeClass = (text) => (text.length > 12 ? 'text-[9px]' : text.length > 9 ? 'text-[10px]' : 'text-xs');
+
 export function CoinIcon({ className = "w-4 h-4", glow = true }) {
   return (
     <svg 
@@ -55,12 +61,20 @@ export default function Upgrader({
   const [result, setResult] = useState(null); // 'win' | 'loss' | null
   const [showBuy, setShowBuy] = useState(false);
   const [isBuying, setIsBuying] = useState(false);
+  const [buyCount, setBuyCount] = useState(1);
 
   const { quota, pending, refresh: refreshQuota, afterSpin, buyBonus } = useSpinQuota({
     discordUser,
     guestBalance: userBalance,
     onGuestBalance: onUpdateBalance,
   });
+
+  // A loss can leave the bet bigger than the balance — pull it back down to what is actually wagerable
+  useEffect(() => {
+    if (isSpinning) return;
+    const wagerable = clampBet(Math.floor(userBalance));
+    if (betAmount > wagerable) setBetAmount(Math.max(1, wagerable));
+  }, [isSpinning, userBalance, betAmount]);
 
   // REAL ONLY: Left side = Real Wins, Right side = Real Losses
   const [realWins, setRealWins] = useState([]);
@@ -122,7 +136,7 @@ export default function Upgrader({
   // Quick Bet Adjustment Handlers
   const handleBetAdd = (val) => {
     if (isSpinning) return;
-    setBetAmount((prev) => Math.min(userBalance, prev + val));
+    setBetAmount((prev) => clampBet(Math.min(userBalance, prev + val)));
     playSound('click');
   };
 
@@ -134,7 +148,7 @@ export default function Upgrader({
 
   const handleBetDouble = () => {
     if (isSpinning) return;
-    setBetAmount((prev) => Math.min(userBalance, prev * 2));
+    setBetAmount((prev) => clampBet(Math.min(userBalance, prev * 2)));
     playSound('click');
   };
 
@@ -146,7 +160,7 @@ export default function Upgrader({
 
   const handleBetMax = () => {
     if (isSpinning) return;
-    setBetAmount(userBalance);
+    setBetAmount(clampBet(Math.floor(userBalance)));
     playSound('click');
   };
 
@@ -342,6 +356,7 @@ export default function Upgrader({
 
   const openShop = () => {
     if (isSpinning) return;
+    setBuyCount(1);
     setShowBuy(true);
     playSound('click');
   };
@@ -350,7 +365,7 @@ export default function Upgrader({
     if (isBuying) return;
     setIsBuying(true);
     try {
-      await buyBonus();
+      await buyBonus(buyCount);
       setShowBuy(false);
       playSound('click');
     } catch (e) {
@@ -360,9 +375,11 @@ export default function Upgrader({
     }
   };
 
-  const resetTimeText = new Date(quota.nextResetAt).toLocaleString('ru-RU', {
-    day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit'
+  const resetText = new Date(quota.nextResetAt).toLocaleString('ru-RU', {
+    day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit'
   });
+
+  const selectedCost = quota.bonusCosts[buyCount - 1] ?? quota.bonusCost;
 
   const isDark = theme === 'dark';
 
@@ -400,10 +417,11 @@ export default function Upgrader({
             ) : (
               realWins.map((item) => {
                 const isBigItem = item.amount >= 10000;
+                const sum = `+${item.amount.toLocaleString('ru-RU')}`;
                 return (
                   <div
                     key={item.id}
-                    className={`p-2.5 shadow-sm flex items-center justify-between transition-all duration-200 hover:translate-x-1 animate-item-entry ${
+                    className={`p-2.5 shadow-sm flex items-center justify-between gap-2 transition-all duration-200 hover:translate-x-1 animate-item-entry ${
                       isBigItem
                         ? isDark
                           ? 'bg-gradient-to-r from-amber-950/70 via-[#182338] to-amber-900/40 shadow-[0_0_12px_rgba(245,158,11,0.25)]'
@@ -413,7 +431,7 @@ export default function Upgrader({
                           : 'bg-sky-50/80 hover:bg-sky-100/80'
                     }`}
                   >
-                    <div className="flex items-center gap-2 min-w-0">
+                    <div className="flex items-center gap-2 min-w-0 flex-1">
                       <img
                         src={item.avatar || DEFAULT_AVATAR}
                         alt={item.user}
@@ -428,13 +446,13 @@ export default function Upgrader({
                         </div>
                       </div>
                     </div>
-                    <div className="flex items-center gap-1">
-                      <span className={`text-xs font-orbitron font-black ${
+                    <div className="flex items-center gap-1 shrink-0">
+                      <span className={`font-orbitron font-black tabular-nums whitespace-nowrap ${sumSizeClass(sum)} ${
                         isBigItem
                           ? 'bg-gradient-to-r from-yellow-300 via-amber-400 to-orange-400 bg-clip-text text-transparent drop-shadow-[0_0_6px_rgba(251,191,36,0.6)]'
                           : 'text-emerald-400'
                       }`}>
-                        +{item.amount.toLocaleString()}
+                        {sum}
                       </span>
                       <CoinIcon className="w-3.5 h-3.5" />
                     </div>
@@ -507,9 +525,9 @@ export default function Upgrader({
                   <input
                     type="number"
                     min="1"
-                    max={userBalance}
+                    max={clampBet(Math.floor(userBalance))}
                     value={betAmount}
-                    onChange={(e) => setBetAmount(Math.max(1, parseInt(e.target.value) || 0))}
+                    onChange={(e) => setBetAmount(clampBet(parseInt(e.target.value, 10) || 1))}
                     disabled={isSpinning}
                     className={`w-full pl-4 pr-10 py-2 font-orbitron font-black text-sm outline-none transition-all ${
                       isDark 
@@ -786,6 +804,12 @@ export default function Upgrader({
                 </span>
               )}
             </button>
+
+            {quota.left === 0 && (
+              <p className="mt-2 text-[10px] font-rajdhani font-bold uppercase tracking-wider text-slate-400 text-center">
+                Ресет спинов: {resetText}
+              </p>
+            )}
           </div>
 
           {/* ======================================================== */}
@@ -937,10 +961,11 @@ export default function Upgrader({
             ) : (
               realLosses.map((item) => {
                 const isBigLossItem = item.bet >= 10000;
+                const sum = `-${item.bet.toLocaleString('ru-RU')}`;
                 return (
                   <div
                     key={item.id}
-                    className={`p-2.5 shadow-sm flex items-center justify-between transition-all duration-200 hover:translate-x-1 animate-item-entry ${
+                    className={`p-2.5 shadow-sm flex items-center justify-between gap-2 transition-all duration-200 hover:translate-x-1 animate-item-entry ${
                       isBigLossItem
                         ? isDark
                           ? 'bg-gradient-to-r from-rose-950/80 via-[#1e111a] to-red-900/50 shadow-[0_0_12px_rgba(244,63,94,0.3)]'
@@ -950,7 +975,7 @@ export default function Upgrader({
                           : 'bg-rose-50/80 hover:bg-rose-100/80'
                     }`}
                   >
-                    <div className="flex items-center gap-2 min-w-0">
+                    <div className="flex items-center gap-2 min-w-0 flex-1">
                       <img
                         src={item.avatar || DEFAULT_AVATAR}
                         alt={item.user}
@@ -965,13 +990,13 @@ export default function Upgrader({
                         </div>
                       </div>
                     </div>
-                    <div className="flex items-center gap-1">
-                      <span className={`text-xs font-orbitron font-black ${
+                    <div className="flex items-center gap-1 shrink-0">
+                      <span className={`font-orbitron font-black tabular-nums whitespace-nowrap ${sumSizeClass(sum)} ${
                         isBigLossItem
                           ? 'bg-gradient-to-r from-rose-400 via-red-500 to-purple-600 bg-clip-text text-transparent drop-shadow-[0_0_6px_rgba(244,63,94,0.6)]'
                           : 'text-rose-500'
                       }`}>
-                        -{item.bet.toLocaleString()}
+                        {sum}
                       </span>
                       <CoinIcon className="w-3.5 h-3.5" />
                     </div>
@@ -996,7 +1021,7 @@ export default function Upgrader({
             <div className="flex items-start justify-between gap-3">
               <div className="flex items-center gap-2">
                 <ShoppingCart className="w-5 h-5 text-fuchsia-400" />
-                <span className="font-orbitron font-black text-sm uppercase tracking-widest">Дополнительный спин</span>
+                <span className="font-orbitron font-black text-sm uppercase tracking-widest">Дополнительные спины</span>
               </div>
               <button onClick={() => setShowBuy(false)} className="p-1 -mt-1 -mr-1 opacity-60 hover:opacity-100">
                 <X className="w-4 h-4" />
@@ -1004,20 +1029,51 @@ export default function Upgrader({
             </div>
 
             <p className="mt-4 text-[11px] font-rajdhani uppercase tracking-wider text-slate-400 font-bold">
+              Сколько
+            </p>
+            <div className="mt-1.5 grid grid-cols-3 gap-1.5">
+              {[1, 2, 3].map((n) => {
+                const packCost = quota.bonusCosts[n - 1];
+                const selected = buyCount === n;
+                return (
+                  <button
+                    key={n}
+                    onClick={() => { setBuyCount(n); playSound('click'); }}
+                    className={`py-2 px-1 transition-all active:scale-95 ${
+                      selected
+                        ? 'bg-gradient-to-r from-fuchsia-600 to-purple-700 text-white shadow-[0_0_14px_rgba(147,51,234,0.4)]'
+                        : isDark ? 'bg-[#162343] text-slate-300 hover:bg-[#1b2b52]' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    }`}
+                  >
+                    <span className="block font-orbitron font-black text-sm">{n}</span>
+                    <span className={`block font-mono text-[9px] font-bold mt-0.5 ${selected ? 'text-white/85' : 'text-slate-400'}`}>
+                      {packCost.toLocaleString('ru-RU')}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            <p className="mt-4 text-[11px] font-rajdhani uppercase tracking-wider text-slate-400 font-bold">
               Стоимость
             </p>
-            <div className="flex items-center gap-2 mt-1">
+            <div className="flex items-end gap-2 mt-1 flex-wrap">
               <span className="font-orbitron font-black text-2xl text-fuchsia-400">
-                {quota.bonusCost.toLocaleString('ru-RU')}
+                {selectedCost.toLocaleString('ru-RU')}
               </span>
-              <CoinIcon className="w-5 h-5" />
+              <CoinIcon className="w-5 h-5 mb-1" />
+              {buyCount > 1 && (
+                <span className="font-mono text-[10px] font-bold text-emerald-400 mb-1">
+                  по {Math.floor(selectedCost / buyCount).toLocaleString('ru-RU')} за спин
+                </span>
+              )}
             </div>
 
             <p className={`mt-4 text-xs font-rajdhani leading-relaxed ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
               Купленный спин сгорает, если не использовать его до следующего ресета
             </p>
             <p className="mt-2 text-[10px] font-mono text-slate-400">
-              Ресет: {resetTimeText}
+              Ресет: {resetText}
             </p>
 
             <div className="mt-5 flex items-center gap-2">
@@ -1025,7 +1081,7 @@ export default function Upgrader({
                 onClick={confirmBuy}
                 className="flex-1 py-2.5 font-orbitron font-black text-[11px] uppercase tracking-widest text-white bg-gradient-to-r from-fuchsia-600 to-purple-700 hover:from-fuchsia-500 hover:to-purple-600 shadow-lg active:scale-95 transition-all"
               >
-                Купить
+                {isBuying ? 'Покупка...' : `Купить ${buyCount}`}
               </button>
               <button
                 onClick={() => setShowBuy(false)}

@@ -5,12 +5,22 @@ import Upgrader from './components/Upgrader';
 import DiscordAuthModal from './components/DiscordAuthModal';
 import Leaderboard from './components/Leaderboard';
 import PayForm from './components/PayForm';
+import LoanPanel from './components/LoanPanel';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('main');
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [discordUser, setDiscordUser] = useState(null);
-  const [userBalance, setUserBalance] = useState(1000);
+  // Guests keep their balance in localStorage; read it before the first render so nothing
+  // (like the daily loan interest) is applied to a placeholder number
+  const [userBalance, setUserBalance] = useState(() => {
+    try {
+      const saved = localStorage.getItem('fazenn_guest_balance');
+      return saved !== null && Number.isFinite(Number(saved)) ? Math.round(Number(saved)) : 5000;
+    } catch (e) {
+      return 5000;
+    }
+  });
   const [theme, setTheme] = useState('light');
 
   const loadGuestBalance = () => {
@@ -84,6 +94,20 @@ export default function App() {
     });
   };
 
+  // Loan interest may drive the balance below zero on purpose — this setter keeps the sign
+  const handleSetBalance = (newBalance) => {
+    setUserBalance((prev) => {
+      const updated = typeof newBalance === 'function' ? newBalance(prev) : newBalance;
+      const safeVal = Math.round(updated);
+      if (!discordUser) {
+        try {
+          localStorage.setItem('fazenn_guest_balance', safeVal.toString());
+        } catch (e) {}
+      }
+      return safeVal;
+    });
+  };
+
   const handleAddCoins = (amount = 25000) => {
     // Only available for guests/demo mode
     if (!discordUser) {
@@ -143,13 +167,21 @@ export default function App() {
               <div id="leaderboard" className="scroll-mt-[150px] lg:scroll-mt-24">
                 <Leaderboard theme={theme} refreshKey={leaderboardKey} />
               </div>
-              <div id="pay" className="scroll-mt-[150px] lg:scroll-mt-24">
+              <div id="pay" className="scroll-mt-[150px] lg:scroll-mt-24 space-y-6">
+                <LoanPanel
+                  theme={theme}
+                  discordUser={discordUser}
+                  userBalance={userBalance}
+                  onUpdateBalance={handleSetBalance}
+                  onChanged={() => setLeaderboardKey((k) => k + 1)}
+                />
                 <PayForm
                   theme={theme}
                   user={discordUser}
                   onOpenAuthModal={() => setIsAuthModalOpen(true)}
                   onBalanceChange={setUserBalance}
                   onPaid={() => setLeaderboardKey((k) => k + 1)}
+                  balance={userBalance}
                 />
               </div>
             </section>

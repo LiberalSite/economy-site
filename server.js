@@ -197,21 +197,33 @@ app.get('/api/economy/leaderboard', async (req, res) => {
 
 app.post('/api/economy/pay', requireUser, async (req, res) => {
   const { targetId } = req.body || {};
-  const amount = toPositiveInt(req.body?.amount);
-  if (!isDiscordId(targetId) || !amount) return res.status(400).json({ error: 'Некорректная сумма или получатель' });
+  const receive = toPositiveInt(req.body?.receive);
+  // the client sends whichever field the user edited last; 15% commission is taken on the server
+  const pay = toPositiveInt(req.body?.amount) || (receive ? db.payForReceive(receive) : 0);
+  if (!isDiscordId(targetId) || pay < 1) return res.status(400).json({ error: 'Некорректная сумма или получатель' });
   try {
-    const r = await db.transfer(req.user.id, targetId, amount, req.user.username);
-    res.json({ success: true, senderBalance: r.sender_balance, targetBalance: r.target_balance });
+    const r = await db.transfer(req.user.id, targetId, pay, req.user.username);
+    res.json({
+      success: true,
+      senderBalance: r.sender_balance,
+      targetBalance: r.target_balance,
+      paid: r.paid,
+      received: r.received,
+      fee: r.fee,
+    });
   } catch (err) {
     sendDbError(res, err);
   }
 });
 
 // ─── Upgrader ───
+const MAX_BET = 9999999999; // 10 digits, same cap as the site
+
 app.post('/api/upgrader/spin', requireUser, async (req, res) => {
   const bet = toPositiveInt(req.body?.bet);
   const chance = Number(req.body?.chance);
   if (!bet) return res.status(400).json({ error: 'Некорректная ставка' });
+  if (bet > MAX_BET) return res.status(400).json({ error: 'Максимальная ставка — 9 999 999 999 🪙' });
   if (!Number.isFinite(chance) || chance < 1 || chance > 75) return res.status(400).json({ error: 'Шанс должен быть от 1 до 75%' });
   try {
     const r = await db.upgraderSpin(req.user.id, bet, Math.round(chance * 100) / 100, req.user.username, req.user.avatar);
@@ -230,7 +242,7 @@ app.post('/api/upgrader/spin', requireUser, async (req, res) => {
   }
 });
 
-// { limit, used, left, next_reset_at, balance, bonus_spins, bonus_expires_at, bonus_cost } → camelCase for the client
+// { limit, used, left, next_reset_at, balance, bonus_spins, bonus_expires_at, bonus_costs } → camelCase for the client
 function quotaPayload(q) {
   return {
     spinLimit: q.limit,
@@ -240,6 +252,7 @@ function quotaPayload(q) {
     bonusSpins: q.bonus_spins,
     bonusExpiresAt: q.bonus_expires_at,
     bonusCost: Number(q.bonus_cost),
+    bonusCosts: (q.bonus_costs || []).map(Number),
   };
 }
 
@@ -252,16 +265,73 @@ app.get('/api/upgrader/quota', requireUser, async (req, res) => {
 });
 
 app.post('/api/upgrader/buy-spin', requireUser, async (req, res) => {
+  const count = Math.min(3, Math.max(1, toPositiveInt(req.body?.count) || 1));
   try {
-    const q = await db.buyBonusSpin(req.user.id);
-    res.json({ success: true, cost: Number(q.cost), balance: Number(q.balance), ...quotaPayload(q) });
+    const q = await db.buyBonusSpin(req.user.id, count);
+    res.json({ success: true, cost: Number(q.cost), count, balance: Number(q.balance), ...quotaPayload(q) });
   } catch (err) {
     sendDbError(res, err);
   }
 });
 
-app.get('/api/upgrader/history', async (req, res) => {
+// ─── Loans ───
+// { balance, can_borrow, max_borrow, min_amount, loan, week_rate_preview, month_rate_preview } → camelCase
+function loanPayload(o) {
+  const loan = o.loan ? {
+    id: o.loan.id,
+    principal: Number(o.loan.principal),
+    repaid: Number(o.loan.repaid),
+    interestPaid: Number(o.loan.interest_paid),
+    term: o.loan.term,
+    termDays: o.loan.term_days,
+    day: o.loan.day,
+    startedAt: o.loan.started_at,
+    dueAt: o.loan.due_at,
+    overdue: o.loan.overdue,
+    remaining: Number(o.loan.remaining),
+    dayRate: Number(o.loan.day_rate),
+    nextChargeAt: o.loan.next_charge_at,
+  } : null;
+  return {
+    balance: Number(o.balance),
+    canBorrow: Number(o.can_borrow),
+    maxBorrow: Number(o.max_borrow),
+    minAmount: Number(o.min_amount),
+    loan,
+    previews: { week: o.week_rate_preview, month: o.month_rate_preview },
+  };
+}
+
+app.get('/api/loan', requireUser, async (req, res) => {
   try {
+    res.json({ success: true, ...loanPayload(await db.loanOffer(req.user.id)) });
+  } catch (err) {
+    sendDbError(res, err);
+  }
+});
+
+app.post('/api/loan/take', requireUser, async (req, res) => {
+  const amount = toPositiveInt(req.body?.amount);
+  const term = req.body?.term === 'month' ? 'month' : req.body?.term === 'week' ? 'week' : null;
+  if (!amount || !term) return res.status(400).json({ error: 'Нужны сумма и срок (week или month)' });
+  try {
+    res.json({ success: true, ...loanPayload(await db.takeLoan(req.user.id, amount, term, req.user.username, req.user.avatar)) });
+  } catch (err) {
+    sendDbError(res, err);
+  }
+});
+
+app.post('/api/loan/repay', requireUser, async (req, res) => {
+  const amount = toPositiveInt(req.body?.amount);
+  if (!amount) return res.status(400).json({ error: 'Некорректная сумма погашения' });
+  try {
+    res.json({ success: true, ...loanPayload(await db.repayLoan(req.user.id, amount)) });
+  } catch (err) {
+    sendDbError(res, err);
+  }
+});
+
+app.get('/api/upgrader/history', async (req, res) => {  try {
     const { wins, losses } = await db.upgraderHistory(30);
     const map = (l) => ({
       id: l.id,

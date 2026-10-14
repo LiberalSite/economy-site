@@ -1,9 +1,15 @@
 import React, { useEffect, useState } from 'react';
 
-export default function PayForm({ theme, user, onOpenAuthModal, onBalanceChange, onPaid }) {
+// Must match public.transfer_coins: fee = FLOOR(pay * 0.15), received = pay - fee
+const receiveFromPay = (pay) => pay - Math.floor((pay * 3) / 20);
+const payForReceive = (receive) => Math.floor((20 * (receive - 1)) / 17) + 1;
+
+export default function PayForm({ theme, user, onOpenAuthModal, onBalanceChange, onPaid, balance }) {
   const [users, setUsers] = useState([]);
   const [targetId, setTargetId] = useState('');
-  const [amount, setAmount] = useState('');
+  const [pay, setPay] = useState('');
+  const [receive, setReceive] = useState('');
+  const [lastEdited, setLastEdited] = useState('pay');
   const [message, setMessage] = useState(null);
   const [isSending, setIsSending] = useState(false);
   const isDark = theme === 'dark';
@@ -20,21 +26,52 @@ export default function PayForm({ theme, user, onOpenAuthModal, onBalanceChange,
     loadUsers();
   }, []);
 
+  const toInt = (value) => {
+    const n = Math.floor(Number(value));
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  };
+
+  const payValue = toInt(pay);
+  const receiveValue = toInt(receive);
+  const fee = payValue ? payValue - receiveFromPay(payValue) : 0;
+
+  const handlePay = (value) => {
+    setPay(value);
+    setLastEdited('pay');
+    const n = toInt(value);
+    setReceive(n ? String(receiveFromPay(n)) : '');
+  };
+
+  const handleReceive = (value) => {
+    setReceive(value);
+    setLastEdited('receive');
+    const n = toInt(value);
+    setPay(n ? String(payForReceive(n)) : '');
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setIsSending(true);
     setMessage(null);
     try {
+      const body = { targetId };
+      // only one field goes to the server — it re-derives the other with the same integer math
+      if (lastEdited === 'receive') body.receive = receiveValue;
+      else body.amount = payValue;
       const res = await fetch('/api/economy/pay', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ targetId, amount: Number(amount) })
+        body: JSON.stringify(body)
       });
       const data = await res.json();
       if (data.success) {
         onBalanceChange(data.senderBalance);
-        setMessage({ type: 'success', text: 'Перевод выполнен' });
-        setAmount('');
+        setMessage({
+          type: 'success',
+          text: `Отправлено ${data.paid.toLocaleString('ru-RU')} 🪙 · получатель получил ${data.received.toLocaleString('ru-RU')} 🪙 (комиссия ${data.fee.toLocaleString('ru-RU')})`
+        });
+        setPay('');
+        setReceive('');
         loadUsers();
         onPaid?.();
       } else {
@@ -63,6 +100,12 @@ export default function PayForm({ theme, user, onOpenAuthModal, onBalanceChange,
   }
 
   const recipients = users.filter(u => u.id !== user.id);
+  const fieldClass = `w-full p-2 border rounded outline-none transition-colors ${
+    isDark
+      ? 'bg-[#15203b] text-white border-slate-700 focus:bg-[#1a294d] placeholder-slate-500'
+      : 'bg-slate-50 text-slate-900 border-slate-300 focus:bg-white'
+  }`;
+  const notEnough = balance != null && payValue > balance;
 
   return (
     <div className={`p-6 ${isDark ? 'bg-[#0a1122] text-white' : 'bg-white'} rounded-md shadow-lg w-full`}>
@@ -85,20 +128,46 @@ export default function PayForm({ theme, user, onOpenAuthModal, onBalanceChange,
             </option>
           ))}
         </select>
-        <input
-          type="number"
-          min="1"
-          step="1"
-          placeholder="Сумма"
-          className={`w-full p-2 border rounded outline-none transition-colors ${
-            isDark
-              ? 'bg-[#15203b] text-white border-slate-700 focus:bg-[#1a294d] placeholder-slate-500'
-              : 'bg-slate-50 text-slate-900 border-slate-300 focus:bg-white'
-          }`}
-          value={amount}
-          onChange={e => setAmount(e.target.value)}
-          required
-        />
+        <div>
+          <label className={`block mb-1 text-[11px] font-orbitron font-bold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+            Я заплачу
+          </label>
+          <input
+            type="number"
+            min="1"
+            step="1"
+            placeholder="Сумма списания"
+            className={fieldClass}
+            value={pay}
+            onChange={e => handlePay(e.target.value)}
+            required
+          />
+        </div>
+        <div>
+          <label className={`block mb-1 text-[11px] font-orbitron font-bold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+            Он(а) получит
+          </label>
+          <input
+            type="number"
+            min="1"
+            step="1"
+            placeholder="Сумма зачисления"
+            className={fieldClass}
+            value={receive}
+            onChange={e => handleReceive(e.target.value)}
+            required
+          />
+        </div>
+        {payValue > 0 && (
+          <p className={`text-xs font-rajdhani ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+            Комиссия 15%: <span className="font-bold text-amber-400">{fee.toLocaleString('ru-RU')} 🪙</span> — уходит участникам роли-получателя
+          </p>
+        )}
+        {notEnough && (
+          <p className="text-xs font-rajdhani text-rose-400">
+            На балансе не хватает монет: доступно {balance.toLocaleString('ru-RU')} 🪙
+          </p>
+        )}
         <button
           type="submit"
           disabled={isSending}
@@ -107,7 +176,7 @@ export default function PayForm({ theme, user, onOpenAuthModal, onBalanceChange,
           {isSending ? 'Отправка...' : 'Перевести'}
         </button>
         {message && (
-          <div className={`mt-2 text-center ${message.type === 'success' ? 'text-emerald-400' : 'text-rose-400'}`}>
+          <div className={`mt-2 text-center text-sm ${message.type === 'success' ? 'text-emerald-400' : 'text-rose-400'}`}>
             {message.text}
           </div>
         )}

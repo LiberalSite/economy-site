@@ -22,26 +22,40 @@ function saveGuest(state) {
   }
 }
 
+// Same price list as public.bonus_costs() in Postgres: bigger packs are cheaper per round.
+function bonusCosts(balance) {
+  const b = Math.max(0, balance);
+  return [
+    Math.max(1, Math.floor(b * 0.25)),
+    Math.max(2, Math.floor(b * 0.45)),
+    Math.max(3, Math.floor(b * 0.60)),
+  ];
+}
+
 function guestView(state, balance, now) {
   const fresh = state.spins.filter((t) => now - t < WINDOW_MS);
+  const costs = bonusCosts(balance);
   return {
     limit: SPIN_LIMIT,
     used: fresh.length,
     left: Math.max(0, SPIN_LIMIT - fresh.length),
     nextResetAt: fresh.length ? Math.min(...fresh) + WINDOW_MS : now + WINDOW_MS,
     bonusSpins: state.bonusExpiresAt > now ? state.bonusSpins : 0,
-    bonusCost: Math.max(1, Math.floor(balance * 0.25)),
+    bonusCosts: costs,
+    bonusCost: costs[0],
   };
 }
 
 function serverView(data, now) {
   const expires = data.bonusExpiresAt ? Date.parse(data.bonusExpiresAt) : 0;
+  const costs = data.bonusCosts && data.bonusCosts.length ? data.bonusCosts : [data.bonusCost, data.bonusCost, data.bonusCost];
   return {
     limit: data.spinLimit,
     used: data.spinsUsed,
     left: data.spinsLeft,
     nextResetAt: Date.parse(data.nextResetAt),
     bonusSpins: expires > now ? data.bonusSpins : 0,
+    bonusCosts: costs,
     bonusCost: data.bonusCost,
   };
 }
@@ -76,7 +90,7 @@ export default function useSpinQuota({ discordUser, guestBalance, onGuestBalance
   // Quota until the server answers, so a logged-in user is never shown a wrong 0/3.
   const pending = Boolean(discordUser) && !server;
   const quota = pending
-    ? { limit: SPIN_LIMIT, used: 0, left: SPIN_LIMIT, nextResetAt: now + WINDOW_MS, bonusSpins: 0, bonusCost: 0 }
+    ? { limit: SPIN_LIMIT, used: 0, left: SPIN_LIMIT, nextResetAt: now + WINDOW_MS, bonusSpins: 0, bonusCosts: [0, 0, 0], bonusCost: 0 }
     : discordUser
       ? serverView(server, now)
       : guestView(guest, guestBalance, now);
@@ -102,27 +116,32 @@ export default function useSpinQuota({ discordUser, guestBalance, onGuestBalance
     setNow(ts);
   }, [guest]);
 
-  const buyBonus = useCallback(async () => {
+  const buyBonus = useCallback(async (count = 1) => {
     if (discordUser) {
-      const res = await fetch('/api/upgrader/buy-spin', { method: 'POST' });
+      const res = await fetch('/api/upgrader/buy-spin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ count }),
+      });
       const data = await res.json();
       if (!data.success) throw new Error(data.error || 'Не удалось купить спин');
       setServer(data);
-      return { ok: true, cost: data.cost, balance: data.balance };
+      return { ok: true, cost: data.cost, count };
     }
     const ts = Date.now();
     const current = guestView(guest, guestBalance, ts);
-    if (guestBalance < current.bonusCost) throw new Error('Недостаточно монет на балансе');
+    const cost = current.bonusCosts[count - 1];
+    if (guestBalance < cost) throw new Error('Недостаточно монет на балансе');
     const next = {
       spins: guest.spins.filter((t) => ts - t < WINDOW_MS),
-      bonusSpins: current.bonusSpins + 1,
+      bonusSpins: current.bonusSpins + count,
       bonusExpiresAt: current.nextResetAt,
     };
     saveGuest(next);
     setGuest(next);
-    onGuestBalance((prev) => prev - current.bonusCost);
+    onGuestBalance((prev) => prev - cost);
     setNow(ts);
-    return { ok: true, cost: current.bonusCost };
+    return { ok: true, cost, count };
   }, [discordUser, guest, guestBalance, onGuestBalance]);
 
   return { quota, pending, refresh, afterSpin, buyBonus };

@@ -43,7 +43,7 @@ export default function Navbar({ activeTab, setActiveTab, onScrollTo, user, onOp
               <button
                 onClick={onAddCoins}
                 disabled={isSpinning}
-                className={`ml-1 lg:ml-2 px-1.5 lg:px-2 py-0.5 bg-sky-600 hover:bg-sky-700 text-white font-mono text-[10px] font-black shadow-sm transition-transform active:scale-90 hidden sm:flex sm:items-center gap-1 ${isSpinning ? 'opacity-40 cursor-not-allowed hover:bg-sky-600' : ''}`}
+                className={`ml-1 lg:ml-2 px-1.5 lg:px-2 py-0.5 bg-sky-600 hover:bg-sky-700 text-white font-mono text-[10px] font-black shadow-sm transition-transform active:scale-90 flex items-center gap-1 ${isSpinning ? 'opacity-40 cursor-not-allowed hover:bg-sky-600' : ''}`}
                 title="Добавить +25,000 для тестов"
               >
                 <Plus className="w-3 h-3" />
@@ -152,7 +152,7 @@ export default function Navbar({ activeTab, setActiveTab, onScrollTo, user, onOp
             }`}
           >
             <span className="hidden lg:inline">LEADERBOARD</span>
-            <span className="lg:hidden">ТОП</span>
+            <span className="lg:hidden">TOP</span>
           </button>
 
           {/* Pay button */}
@@ -167,7 +167,8 @@ export default function Navbar({ activeTab, setActiveTab, onScrollTo, user, onOp
                   : 'text-slate-700 hover:text-sky-600 hover:bg-white'
             }`}
           >
-            <span>PAY</span>
+            <span className="hidden lg:inline">PAY &amp; LOANS</span>
+            <span className="lg:hidden">КРЕДИТ</span>
           </button>
         </nav>
       </div>
