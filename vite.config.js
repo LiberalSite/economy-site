@@ -98,7 +98,8 @@ export default defineConfig(({ mode }) => {
     server: {
       port: 3000,
       open: false,
-      host: true
+      host: true,
+      allowedHosts: true
     }
   };
 });

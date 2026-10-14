@@ -4,6 +4,7 @@ dist/
 .env.local
 .env.*.local
 .vercel/
+cloudflared.exe
 
 # Ignore large video folder in the workspace
 S/
