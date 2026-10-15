@@ -281,18 +281,17 @@ export async function handleAlertsInteraction(interaction) {
     return true;
   }
 
-  const [, action, rest = ''] = id.split(':');
+  const [, action, key = '', field = ''] = id.split(':');
   if (action === 'bk') {
     await alertsCommand(interaction);
     return true;
   }
 
-  const [key, field] = action === 'pk' ? [rest] : rest.split(':');
   if (!ALERT_HINTS[key]) return false;
 
   const guild = interaction.guild;
   const refresh = async () => {
-    await interaction.update(await panelMessage(guild, key)).catch(() => {});
+    await interaction.update(await panelMessage(guild, key));
     return true;
   };
 
@@ -332,7 +331,7 @@ export async function handleAlertsInteraction(interaction) {
       ...(msg.content ? { content: msg.content.replace(/@/g, '\\@') } : {}),
       embeds: msg.embeds,
       ...EPHEMERAL,
-    }).catch(() => {});
+    });
     return true;
   }
 
@@ -357,7 +356,7 @@ export async function handleAlertsInteraction(interaction) {
     }
     await saveAlert(guild.id, key, { [field]: field === 'color' ? (normalizeHex(value) || '') : value });
     // a modal can only answer with a new message, so the refreshed panel comes back as one
-    await interaction.reply(await panelMessage(guild, key)).catch(() => {});
+    await interaction.reply(await panelMessage(guild, key));
     return true;
   }
 

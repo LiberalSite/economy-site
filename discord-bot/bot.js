@@ -735,7 +735,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
     await handleAlertsInteraction(interaction);
   } catch (err) {
     console.error('Ошибка панели оповещений:', err);
-    await interaction.reply({ content: '❌ Не получилось сохранить, попробуй ещё раз.', ...EPHEMERAL }).catch(() => {});
+    await interaction.reply({
+      content: `❌ Не сохранилось: ${err?.userMessage || err?.message || 'неизвестная ошибка'}`,
+      ...EPHEMERAL,
+    }).catch(() => {});
   }
 });
 
