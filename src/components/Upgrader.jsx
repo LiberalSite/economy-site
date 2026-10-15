@@ -14,11 +14,13 @@ import {
   X
 } from 'lucide-react';
 import useSpinQuota from '../hooks/useSpinQuota';
+import { guestLoanReserve } from '../hooks/useLoan';
 
 const DEFAULT_AVATAR = 'https://cdn.discordapp.com/embed/avatars/0.png';
 
 export const MAX_BET = 9999999999; // 10 digits
-const clampBet = (v) => Math.min(Math.max(1, Math.floor(v) || 1), MAX_BET);
+// A bet of 0 means "nothing is wagerable" — the old floor of 1 let a broke account spin a coin it did not have
+const clampBet = (v) => Math.min(Math.max(0, Math.floor(v) || 0), MAX_BET);
 
 // The feed columns are narrow: long sums shrink instead of pushing the avatar, name and coin out of line
 const sumSizeClass = (text) => (text.length > 12 ? 'text-[9px]' : text.length > 9 ? 'text-[10px]' : 'text-xs');
@@ -69,12 +71,16 @@ export default function Upgrader({
     onGuestBalance: onUpdateBalance,
   });
 
-  // A loss can leave the bet bigger than the balance — pull it back down to what is actually wagerable
+  // A loss can leave the bet bigger than the balance — pull it back down to what is actually wagerable.
+  // The daily loan payment stays on the balance: the server enforces that reserve for real accounts
+  // and the guest demo has to honour the same rule.
+  const reserve = discordUser ? 0 : guestLoanReserve();
+  const wagerable = clampBet(Math.max(0, Math.floor(userBalance) - reserve));
+
   useEffect(() => {
     if (isSpinning) return;
-    const wagerable = clampBet(Math.floor(userBalance));
-    if (betAmount > wagerable) setBetAmount(Math.max(1, wagerable));
-  }, [isSpinning, userBalance, betAmount]);
+    if (betAmount > wagerable) setBetAmount(wagerable);
+  }, [isSpinning, wagerable, betAmount]);
 
   // REAL ONLY: Left side = Real Wins, Right side = Real Losses
   const [realWins, setRealWins] = useState([]);
@@ -136,31 +142,31 @@ export default function Upgrader({
   // Quick Bet Adjustment Handlers
   const handleBetAdd = (val) => {
     if (isSpinning) return;
-    setBetAmount((prev) => clampBet(Math.min(userBalance, prev + val)));
+    setBetAmount((prev) => clampBet(Math.min(wagerable, prev + val)));
     playSound('click');
   };
 
   const handleBetHalf = () => {
     if (isSpinning) return;
-    setBetAmount((prev) => Math.max(10, Math.floor(prev / 2)));
+    setBetAmount((prev) => clampBet(Math.min(wagerable, Math.max(1, Math.floor(prev / 2)))));
     playSound('click');
   };
 
   const handleBetDouble = () => {
     if (isSpinning) return;
-    setBetAmount((prev) => clampBet(Math.min(userBalance, prev * 2)));
+    setBetAmount((prev) => clampBet(Math.min(wagerable, prev * 2)));
     playSound('click');
   };
 
   const handleBetMin = () => {
     if (isSpinning) return;
-    setBetAmount(10);
+    setBetAmount(clampBet(Math.min(wagerable, 10)));
     playSound('click');
   };
 
   const handleBetMax = () => {
     if (isSpinning) return;
-    setBetAmount(clampBet(Math.floor(userBalance)));
+    setBetAmount(wagerable);
     playSound('click');
   };
 
@@ -225,14 +231,21 @@ export default function Upgrader({
 
   const spin = async () => {
     if (isSpinning) return;
-    if (betAmount <= 0) return;
     if (outOfRounds) {
       setShowBuy(true);
       playSound('click');
       return;
     }
-    if (betAmount > userBalance) {
-      alert("Недостаточно монет на балансе!");
+    if (betAmount < 1 || betAmount > wagerable) {
+      if (reserve > 0) {
+        alert(betAmount < 1
+          ? `Нечем платить ставку: ${reserve.toLocaleString()} 🪙 на балансе зарезервированы под дневной платёж по кредиту.`
+          : `Ставка больше доступной: резерв кредита — ${reserve.toLocaleString()} 🪙, их нельзя ставить.`);
+      } else {
+        alert(betAmount < 1
+          ? 'Нечем платить ставку: на балансе нет монет. Получи перевод или возьми кредит.'
+          : 'Недостаточно монет на балансе!');
+      }
       return;
     }
 
@@ -465,14 +478,14 @@ export default function Upgrader({
       </aside>
 
       {/* 2. EXACT CENTER: DRUM & CLEAN STAKE / WIN PANELS */}
-      <div className="flex-1 order-first lg:order-none flex flex-col items-center justify-center px-3 pt-3 pb-6 lg:p-4">
+      <div className="flex-1 order-first lg:order-none flex flex-col items-center justify-center px-2 pt-2 pb-4 sm:px-3 sm:pt-3 sm:pb-6 lg:p-4">
         
-        <div className="w-full max-w-5xl grid grid-cols-1 lg:grid-cols-12 gap-4 lg:gap-6 items-center">
+        <div className="w-full max-w-5xl grid grid-cols-2 lg:grid-cols-12 gap-2 lg:gap-6 items-center">
           
           {/* ======================================================== */}
           {/* LEFT BLOCK: STAKE CARD (COIN ICON INSTEAD OF LC)        */}
           {/* ======================================================== */}
-          <div className={`lg:col-span-4 shadow-sm flex flex-col justify-between lg:h-[390px] transition-all duration-300 ${
+          <div className={`col-span-1 lg:col-span-4 shadow-sm flex flex-col justify-between lg:h-[390px] transition-all duration-300 ${
             isDark ? 'bg-[#0d1527]' : 'bg-white'
           } ${isBigBet ? 'shadow-[0_0_20px_rgba(245,158,11,0.15)]' : ''}`}>
             
@@ -483,7 +496,7 @@ export default function Upgrader({
                 : 'bg-gradient-to-r from-sky-500 to-blue-600'
             }`} />
 
-            <div className="px-3 py-3 sm:p-5 flex-1 flex flex-col justify-between">
+            <div className="px-2 py-2.5 sm:px-3 sm:py-3 lg:p-5 flex-1 flex flex-col justify-between">
               
               {/* Card Header */}
               <div>
@@ -502,19 +515,19 @@ export default function Upgrader({
                 </div>
 
                 {/* Main Hero Amount Display */}
-                <div className="my-5 text-center">
+                <div className="my-2 sm:my-5 text-center">
                   <span className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-widest block mb-1">
                     СУММА ДЛЯ АПГРЕЙДА
                   </span>
                   <div className="flex items-center justify-center gap-2">
-                    <span className={`font-orbitron font-black text-3xl tracking-tight transition-all ${
+                    <span className={`font-orbitron font-black text-xl sm:text-3xl tracking-tight transition-all ${
                       isBigBet
                         ? 'bg-gradient-to-r from-amber-300 via-yellow-400 to-orange-400 bg-clip-text text-transparent drop-shadow-[0_0_12px_rgba(251,191,36,0.6)]'
                         : isDark ? 'text-white' : 'text-slate-900'
                     }`}>
                       {betAmount.toLocaleString()}
                     </span>
-                    <CoinIcon className="w-6 h-6" />
+                    <CoinIcon className="w-5 h-5 sm:w-6 sm:h-6" />
                   </div>
                 </div>
               </div>
@@ -524,10 +537,10 @@ export default function Upgrader({
                 <div className="relative flex items-center">
                   <input
                     type="number"
-                    min="1"
-                    max={clampBet(Math.floor(userBalance))}
+                    min="0"
+                    max={wagerable}
                     value={betAmount}
-                    onChange={(e) => setBetAmount(clampBet(parseInt(e.target.value, 10) || 1))}
+                    onChange={(e) => setBetAmount(clampBet(parseInt(e.target.value, 10) || 0))}
                     disabled={isSpinning}
                     className={`w-full pl-4 pr-10 py-2 font-orbitron font-black text-sm outline-none transition-all ${
                       isDark 
@@ -548,7 +561,7 @@ export default function Upgrader({
                         key={val}
                         disabled={isSpinning}
                         onClick={() => handleBetAdd(val)}
-                        className={`py-1.5 text-xs font-orbitron font-black shadow-sm transition-all active:scale-95 ${
+                        className={`py-1.5 text-[10px] sm:text-xs font-orbitron font-black shadow-sm transition-all active:scale-95 ${
                           isDark ? 'bg-[#15203b] hover:bg-[#1f3058] text-sky-400' : 'bg-sky-50 hover:bg-sky-100 text-sky-700'
                         }`}
                       >
@@ -561,7 +574,7 @@ export default function Upgrader({
                     <button
                       disabled={isSpinning}
                       onClick={handleBetHalf}
-                      className={`py-1.5 text-xs font-orbitron font-black shadow-sm transition-all active:scale-95 ${
+                      className={`py-1.5 text-[10px] sm:text-xs font-orbitron font-black shadow-sm transition-all active:scale-95 ${
                         isDark ? 'bg-[#15203b] hover:bg-[#1f3058] text-slate-300' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
                       }`}
                     >
@@ -570,7 +583,7 @@ export default function Upgrader({
                     <button
                       disabled={isSpinning}
                       onClick={handleBetDouble}
-                      className={`py-1.5 text-xs font-orbitron font-black shadow-sm transition-all active:scale-95 ${
+                      className={`py-1.5 text-[10px] sm:text-xs font-orbitron font-black shadow-sm transition-all active:scale-95 ${
                         isDark ? 'bg-[#15203b] hover:bg-[#1f3058] text-slate-300' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
                       }`}
                     >
@@ -579,7 +592,7 @@ export default function Upgrader({
                     <button
                       disabled={isSpinning}
                       onClick={handleBetMin}
-                      className={`py-1.5 text-xs font-orbitron font-black shadow-sm transition-all active:scale-95 ${
+                      className={`py-1.5 text-[10px] sm:text-xs font-orbitron font-black shadow-sm transition-all active:scale-95 ${
                         isDark ? 'bg-[#15203b] hover:bg-[#1f3058] text-slate-300' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
                       }`}
                     >
@@ -588,7 +601,7 @@ export default function Upgrader({
                     <button
                       disabled={isSpinning}
                       onClick={handleBetMax}
-                      className={`py-1.5 text-xs font-orbitron font-black shadow-sm transition-all active:scale-95 ${
+                      className={`py-1.5 text-[10px] sm:text-xs font-orbitron font-black shadow-sm transition-all active:scale-95 ${
                         isBigBet 
                           ? 'bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-white' 
                           : 'bg-sky-600 hover:bg-sky-700 text-white'
@@ -607,10 +620,10 @@ export default function Upgrader({
           {/* ======================================================== */}
           {/* CENTER BLOCK: DRUM WHEEL (TRUE CIRCLE SHOCKWAVE, GREEN/RED) */}
           {/* ======================================================== */}
-          <div className="lg:col-span-4 flex flex-col items-center justify-center">
+          <div className="col-span-2 order-first lg:order-none lg:col-span-4 flex flex-col items-center justify-center">
             
             {/* Drum Stage */}
-            <div className="relative w-[310px] max-w-full aspect-square flex items-center justify-center select-none">
+            <div className="relative w-[170px] sm:w-[250px] lg:w-[310px] max-w-full aspect-square flex items-center justify-center select-none">
               
               {/* SVG DRUM WHEEL */}
               <svg className="w-full h-full overflow-visible" viewBox="0 0 350 350">
@@ -673,18 +686,17 @@ export default function Upgrader({
                   transitionTimingFunction: 'cubic-bezier(0.5, 0.0, 0.15, 1)',
                 }}
               >
-                {/* Needle located INSIDE on smaller circle (translateY -84px) */}
-                <div 
-                  className="absolute"
-                  style={{
-                    transform: `translateY(-${needleRadius}px)`,
-                  }}
+                {/* Needle placed by percentage so it lands on the same ring at every wheel size */}
+                <div
+                  className="absolute left-1/2 -translate-x-1/2 -translate-y-1/2"
+                  style={{ top: `${(needleRadius / (cx * 2)) * 100}%` }}
                 >
                   {/* Faceit sharp chevron arrow head: smooth color morphing */}
-                  <svg 
-                    width="22" 
-                    height="20" 
-                    viewBox="0 0 20 18" 
+                  <svg
+                    width="22"
+                    height="20"
+                    viewBox="0 0 20 18"
+                    className="w-[17px] h-[15px] sm:w-[22px] sm:h-[20px]"
                     style={{
                       filter: `drop-shadow(0 0 10px ${needleColor})`,
                       transition: 'filter 0.6s ease',
@@ -708,11 +720,11 @@ export default function Upgrader({
                 {result === 'win' ? (
                   /* WIN DISPLAY: CHEVRONS UP + WON AMOUNT (NO EXTRA TEXT) */
                   <div className="flex flex-col items-center justify-center animate-item-entry">
-                    <ChevronsUp className={`w-14 h-14 ${
+                    <ChevronsUp className={`w-10 h-10 sm:w-14 sm:h-14 ${
                       isBigWin ? 'text-amber-400 drop-shadow-[0_0_20px_#fbbf24]' : 'text-emerald-400 drop-shadow-[0_0_16px_#10b981]'
                     } animate-bounce`} />
                     <div className="flex items-center gap-1.5 mt-0.5">
-                      <span className={`font-orbitron font-black text-2xl ${
+                      <span className={`font-orbitron font-black text-lg sm:text-2xl ${
                         isBigWin
                           ? 'bg-gradient-to-r from-yellow-300 via-amber-400 to-orange-500 bg-clip-text text-transparent drop-shadow-[0_0_20px_rgba(251,191,36,0.9)]'
                           : 'text-emerald-400'
@@ -725,9 +737,9 @@ export default function Upgrader({
                 ) : result === 'loss' ? (
                   /* LOSS DISPLAY: CHEVRONS DOWN + LOST AMOUNT (NO EXTRA TEXT) */
                   <div className="flex flex-col items-center justify-center animate-item-entry">
-                    <ChevronsDown className="w-14 h-14 text-rose-500 drop-shadow-[0_0_16px_#ef4444] animate-bounce" />
+                    <ChevronsDown className="w-10 h-10 sm:w-14 sm:h-14 text-rose-500 drop-shadow-[0_0_16px_#ef4444] animate-bounce" />
                     <div className="flex items-center gap-1.5 mt-0.5">
-                      <span className={`font-orbitron font-black text-2xl ${
+                      <span className={`font-orbitron font-black text-lg sm:text-2xl ${
                         isBigLoss
                           ? 'bg-gradient-to-r from-rose-400 via-red-500 to-purple-600 bg-clip-text text-transparent drop-shadow-[0_0_20px_rgba(244,63,94,0.9)]'
                           : 'text-rose-500'
@@ -763,8 +775,8 @@ export default function Upgrader({
             {/* IMPROVE BUTTON (NO RUSSIAN 'АПГРЕЙДИТЬ') — carries the 24h round counter */}
             <button
               onClick={outOfRounds ? openShop : spin}
-              disabled={isSpinning || betAmount <= 0}
-              className={`w-full max-w-[280px] mt-4 py-3.5 font-orbitron font-black text-xs tracking-widest uppercase transition-all flex items-center justify-center gap-2 shadow-lg active:scale-95 btn-shimmer-sweep ${
+              disabled={isSpinning}
+              className={`w-full max-w-[280px] mt-2 sm:mt-4 py-2.5 sm:py-3.5 font-orbitron font-black text-xs tracking-widest uppercase transition-all flex items-center justify-center gap-2 shadow-lg active:scale-95 btn-shimmer-sweep ${
                 isSpinning
                   ? 'bg-slate-700 text-slate-400 cursor-not-allowed opacity-80'
                   : outOfRounds
@@ -805,6 +817,14 @@ export default function Upgrader({
               )}
             </button>
 
+            {betAmount < 1 && !isSpinning && (
+              <p className="mt-2 text-[10px] font-rajdhani font-bold uppercase tracking-wider text-red-500 text-center">
+                {reserve > 0
+                  ? `Нечем платить: ${reserve} 🪙 зарезервированы под дневной платёж по кредиту`
+                  : 'На балансе нет монет — нечем платить ставку'}
+              </p>
+            )}
+
             {quota.left === 0 && (
               <p className="mt-2 text-[10px] font-rajdhani font-bold uppercase tracking-wider text-slate-400 text-center">
                 Ресет спинов: {resetText}
@@ -815,7 +835,7 @@ export default function Upgrader({
           {/* ======================================================== */}
           {/* RIGHT BLOCK: WIN CARD (COIN ICON INSTEAD OF LC)         */}
           {/* ======================================================== */}
-          <div className={`lg:col-span-4 shadow-sm flex flex-col justify-between lg:h-[390px] transition-all duration-300 ${
+          <div className={`col-span-1 lg:col-span-4 shadow-sm flex flex-col justify-between lg:h-[390px] transition-all duration-300 ${
             isDark ? 'bg-[#0d1527]' : 'bg-white'
           } ${isBigPotential ? 'shadow-[0_0_25px_rgba(245,158,11,0.2)]' : ''}`}>
             
@@ -826,7 +846,7 @@ export default function Upgrader({
                 : 'bg-gradient-to-r from-emerald-500 to-teal-500'
             }`} />
 
-            <div className="px-3 py-3 sm:p-5 flex-1 flex flex-col justify-between">
+            <div className="px-2 py-2.5 sm:px-3 sm:py-3 lg:p-5 flex-1 flex flex-col justify-between">
               
               {/* Card Header */}
               <div>
@@ -847,19 +867,19 @@ export default function Upgrader({
                 </div>
 
                 {/* Main Hero Amount Display */}
-                <div className="my-4 text-center">
+                <div className="my-2 sm:my-4 text-center">
                   <span className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-widest block mb-1">
                     ВОЗМОЖНЫЙ ВЫИГРЫШ
                   </span>
                   <div className="flex items-center justify-center gap-2">
-                    <span className={`font-orbitron font-black text-3xl tracking-tight transition-all ${
+                    <span className={`font-orbitron font-black text-xl sm:text-3xl tracking-tight transition-all ${
                       isBigPotential
                         ? 'bg-gradient-to-r from-amber-300 via-yellow-300 to-orange-500 bg-clip-text text-transparent drop-shadow-[0_0_16px_rgba(251,191,36,0.85)]'
                         : 'text-emerald-400 drop-shadow-[0_0_10px_rgba(52,211,153,0.5)]'
                     }`}>
                       +{potentialWin.toLocaleString()}
                     </span>
-                    <CoinIcon className="w-6 h-6" />
+                    <CoinIcon className="w-5 h-5 sm:w-6 sm:h-6" />
                   </div>
 
                   {/* Profit breakdown pill */}
@@ -911,7 +931,7 @@ export default function Upgrader({
                         key={opt.label}
                         disabled={isSpinning}
                         onClick={() => handleSelectPreset(opt)}
-                        className={`py-1.5 text-xs font-orbitron font-black shadow-sm transition-all active:scale-95 ${
+                        className={`py-1.5 text-[10px] sm:text-xs font-orbitron font-black shadow-sm transition-all active:scale-95 ${
                           isSelected
                             ? isBigPotential
                               ? 'bg-amber-500 text-slate-950 shadow-md font-black'
@@ -1071,6 +1091,9 @@ export default function Upgrader({
 
             <p className={`mt-4 text-xs font-rajdhani leading-relaxed ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
               Купленный спин сгорает, если не использовать его до следующего ресета
+            </p>
+            <p className="mt-2 text-xs font-rajdhani leading-relaxed text-emerald-400">
+              Монеты за доп. спины не сгорают — они уходят роли, которая собирает проигрыши и комиссии.
             </p>
             <p className="mt-2 text-[10px] font-mono text-slate-400">
               Ресет: {resetText}

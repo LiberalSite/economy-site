@@ -275,30 +275,36 @@ app.post('/api/upgrader/buy-spin', requireUser, async (req, res) => {
 });
 
 // ─── Loans ───
-// { balance, can_borrow, max_borrow, min_amount, loan, week_rate_preview, month_rate_preview } → camelCase
+// { balance, salary_daily, activity_role, day_rate, max_amount, can_borrow, reserve, loan } → camelCase
 function loanPayload(o) {
-  const loan = o.loan ? {
-    id: o.loan.id,
-    principal: Number(o.loan.principal),
-    repaid: Number(o.loan.repaid),
-    interestPaid: Number(o.loan.interest_paid),
-    term: o.loan.term,
-    termDays: o.loan.term_days,
-    day: o.loan.day,
-    startedAt: o.loan.started_at,
-    dueAt: o.loan.due_at,
-    overdue: o.loan.overdue,
-    remaining: Number(o.loan.remaining),
-    dayRate: Number(o.loan.day_rate),
-    nextChargeAt: o.loan.next_charge_at,
-  } : null;
+  const l = o.loan;
   return {
     balance: Number(o.balance),
-    canBorrow: Number(o.can_borrow),
-    maxBorrow: Number(o.max_borrow),
+    salaryDaily: Number(o.salary_daily),
+    activityRole: o.activity_role || null,
+    dayRate: Number(o.day_rate),
     minAmount: Number(o.min_amount),
-    loan,
-    previews: { week: o.week_rate_preview, month: o.month_rate_preview },
+    maxDailyPayment: Number(o.max_daily_payment),
+    maxAmount: Number(o.max_amount),
+    canBorrow: Boolean(o.can_borrow),
+    reserve: Number(o.reserve),
+    loan: l ? {
+      id: l.id,
+      principal: Number(l.principal),
+      repaid: Number(l.repaid),
+      interestPaid: Number(l.interest_paid),
+      dailyPayment: Number(l.daily_payment),
+      totalDue: Number(l.total_due),
+      termDays: Number(l.term_days),
+      day: Number(l.day),
+      daysLeft: Number(l.days_left),
+      startedAt: l.started_at,
+      dueAt: l.due_at,
+      nextChargeAt: l.next_charge_at,
+      remaining: Number(l.remaining),
+      remainingDue: Number(l.remaining_due),
+      salaryPercent: Number(l.salary_percent),
+    } : null,
   };
 }
 
@@ -312,10 +318,10 @@ app.get('/api/loan', requireUser, async (req, res) => {
 
 app.post('/api/loan/take', requireUser, async (req, res) => {
   const amount = toPositiveInt(req.body?.amount);
-  const term = req.body?.term === 'month' ? 'month' : req.body?.term === 'week' ? 'week' : null;
-  if (!amount || !term) return res.status(400).json({ error: 'Нужны сумма и срок (week или month)' });
+  const percent = Math.min(100, Math.max(10, toPositiveInt(req.body?.percent) || 100));
+  if (!amount) return res.status(400).json({ error: 'Укажи сумму кредита' });
   try {
-    res.json({ success: true, ...loanPayload(await db.takeLoan(req.user.id, amount, term, req.user.username, req.user.avatar)) });
+    res.json({ success: true, ...loanPayload(await db.takeLoan(req.user.id, amount, percent, req.user.username, req.user.avatar)) });
   } catch (err) {
     sendDbError(res, err);
   }

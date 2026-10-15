@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { guestLoanReserve } from './useLoan';
 
 export const SPIN_LIMIT = 3;
 const WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -131,7 +132,13 @@ export default function useSpinQuota({ discordUser, guestBalance, onGuestBalance
     const ts = Date.now();
     const current = guestView(guest, guestBalance, ts);
     const cost = current.bonusCosts[count - 1];
-    if (guestBalance < cost) throw new Error('Недостаточно монет на балансе');
+    // Same reserve the server holds a borrower to: the daily loan payment must stay payable
+    const reserve = guestLoanReserve();
+    if (guestBalance - reserve < cost) {
+      throw new Error(reserve > 0
+        ? 'Часть баланса зарезервирована под дневной платёж по кредиту'
+        : 'Недостаточно монет на балансе');
+    }
     const next = {
       spins: guest.spins.filter((t) => ts - t < WINDOW_MS),
       bonusSpins: current.bonusSpins + count,

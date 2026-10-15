@@ -95,9 +95,35 @@ async function refreshEarningsPool(guild, roleId = earningsRoles.get(guild.id)) 
   return db.syncEarningsPool(guild.id, items);
 }
 
+// The loan daily payment is a share of the activity salary, which only lives on Discord roles,
+// so the DB keeps a mirror of it. Members without an activity role get salary 0 → no loan for them.
+async function syncActivitySalaries(guild) {
+  const members = await guild.members.fetch();
+  const items = [...members.values()]
+    .filter(m => !m.user.bot)
+    .map(m => {
+      const tier = getMemberActivityRole(m);
+      return { id: m.id, salary: tier?.salary || 0, role: tier ? `${tier.tag} ${tier.name}` : null };
+    });
+  for (let i = 0; i < items.length; i += 500) {
+    await db.syncActivity(items.slice(i, i + 500));
+  }
+  return items.length;
+}
+
+async function syncMemberSalary(member) {
+  const tier = getMemberActivityRole(member);
+  await db.syncActivity([{
+    id: member.id,
+    salary: tier?.salary || 0,
+    role: tier ? `${tier.tag} ${tier.name}` : null,
+  }]);
+}
+
 async function prepareGuild(guild) {
   await loadEarningsRole(guild).catch(() => {});
   await refreshEarningsPool(guild).catch(err => console.warn(`Не обновил пул роли на ${guild.name}:`, err.message));
+  await syncActivitySalaries(guild).catch(err => console.warn(`Не синхронизировал зарплаты на ${guild.name}:`, err.message));
 }
 
 // Initialize Discord Client
@@ -172,20 +198,17 @@ const commands = [
 
   new SlashCommandBuilder()
     .setName('loan')
-    .setDescription('💸 Кредит монет: состояние, взятие и погашение')
-    .addSubcommand((s) => s.setName('info').setDescription('Мой кредит, ставка и доступный лимит'))
+    .setDescription('💸 Кредит под зарплату за активность: состояние, взятие и погашение')
+    .addSubcommand((s) => s.setName('info').setDescription('Мой кредит, зарплата и доступный максимум'))
     .addSubcommand((s) => s
       .setName('take')
-      .setDescription('Взять кредит на неделю или месяц')
+      .setDescription('Взять кредит: платёж каждый день — часть твоей дневной зарплаты')
       .addIntegerOption((o) => o.setName('amount').setDescription('Сколько монет').setRequired(true).setMinValue(100))
-      .addStringOption((o) => o
-        .setName('term')
-        .setDescription('Срок кредита')
-        .setRequired(true)
-        .addChoices(
-          { name: 'Неделя — ставка растёт 1%→7%', value: 'week' },
-          { name: 'Месяц — 0,5% каждый день', value: 'month' }
-        )))
+      .addIntegerOption((o) => o
+        .setName('percent')
+        .setDescription('Какая часть дневной зарплаты уходит на кредит (10–100, по умолчанию 100)')
+        .setMinValue(10)
+        .setMaxValue(100)))
     .addSubcommand((s) => s
       .setName('repay')
       .setDescription('Погасить кредит: полностью или частями')
@@ -313,13 +336,14 @@ client.once(Events.ClientReady, async () => {
   setInterval(() => {
     for (const guild of client.guilds.cache.values()) {
       refreshEarningsPool(guild).catch(() => {});
+      syncActivitySalaries(guild).catch(() => {});
     }
   }, POOL_REFRESH_MS);
 
-  // Interest is charged per calendar day; the DB also accrues lazily, this just keeps it moving
+  // The daily payment is charged per calendar day; the DB also does it lazily, this just keeps it moving
   setInterval(() => {
     db.accrueLoans().then((r) => {
-      if (r?.loans) console.log(`💸 [LOAN] Начислено процентов: кредитов ${r.loans}, сумма ${r.interest}, роли ушло ${r.paid_to_role}`);
+      if (r?.loans) console.log(`💸 [LOAN] Списано платежей: кредитов ${r.loans}, сумма ${r.collected}, из них процентов ${r.interest}, роли ушло ${r.paid_to_role}`);
     }).catch(() => {});
   }, LOAN_TICK_MS);
   await db.accrueLoans().catch(() => {});
@@ -350,11 +374,14 @@ client.on(Events.GuildMemberAdd, async (member) => {
 
 client.on(Events.GuildMemberRolesUpdate, async (oldMember, newMember) => {
   const roleId = earningsRoles.get(newMember.guild.id);
-  if (!roleId) return;
-  const had = oldMember?.roles?.cache?.some(r => r.id === roleId) || false;
-  const has = newMember.roles.cache.some(r => r.id === roleId);
-  if (had === has) return;
-  await refreshEarningsPool(newMember.guild, roleId).catch(() => {});
+  if (roleId) {
+    const had = oldMember?.roles?.cache?.some(r => r.id === roleId) || false;
+    const has = newMember.roles.cache.some(r => r.id === roleId);
+    if (had !== has) await refreshEarningsPool(newMember.guild, roleId).catch(() => {});
+  }
+  if (getMemberActivityRole(oldMember)?.tag !== getMemberActivityRole(newMember)?.tag) {
+    await syncMemberSalary(newMember).catch(() => {});
+  }
 });
 
 function leaderboardText(rows) {
@@ -382,33 +409,38 @@ const rateText = (value) => `${Number(value).toLocaleString('ru-RU', { maximumFr
 
 // offer = public.loan_offer() result
 function loanEmbed(o) {
-  const embed = new EmbedBuilder().setColor('#FFB020').setTitle('💸 КРЕДИТ // LG ECONOMY');
-  const lines = [`Баланс: **${num(o.balance)} 🪙**`];
+  const embed = new EmbedBuilder().setColor('#FFB020').setTitle('💸 КРЕДИТ ПОД ЗАРПЛАТУ // LG ECONOMY');
+  const lines = [
+    `Баланс: **${num(o.balance)} 🪙**`,
+    `Зарплата по роли: **${num(o.salary_daily)} 🪙/день** (${o.activity_role || 'роли активностей нет'})`,
+  ];
 
   if (o.loan) {
     const l = o.loan;
-    const charge = Math.floor((l.remaining * Number(l.day_rate)) / 100);
     lines.push(
-      l.overdue ? '⚠️ **Срок прошёл** — ставка продолжает расти каждый день.' : `День ${l.day + 1} из ${l.term_days} (${l.term === 'month' ? 'месяц' : 'неделя'})`,
+      '',
+      `День ${l.day + 1} из ${l.term_days} · платёж **${num(l.daily_payment)} 🪙/день** (${rateText(l.salary_percent)} зарплаты)`,
       `Тело долга: **${num(l.principal)} 🪙**, погашено **${num(l.repaid)} 🪙**`,
-      `Осталось вернуть: **${num(l.remaining)} 🪙**`,
-      `Ставка сегодня: **${rateText(l.day_rate)}** = **${num(charge)} 🪙**`,
+      `Осталось заплатить: **${num(l.remaining_due)} 🪙**, из них самого долга **${num(l.remaining)} 🪙**`,
       `Следующее списание: **${loanDate(l.next_charge_at)}**`,
-      `Срок возврата: ${loanDate(l.due_at)}`,
-      `Уплачено процентов: **${num(l.interest_paid)} 🪙**`
+      `Конец срока: ${loanDate(l.due_at)}`,
+      `Уплачено процентов: **${num(l.interest_paid)} 🪙**`,
+      `⚠️ Пока кредит открыт, на балансе должно оставаться не меньше **${num(l.daily_payment)} 🪙** — этот запас нельзя ставить или переводить.`
     );
-  } else {
+  } else if (Number(o.salary_daily) >= 1) {
     lines.push(
-      `Открытого кредита нет. Доступно к выдаче: **${num(o.can_borrow)} 🪙** (максимум 2 баланса)`,
+      '',
+      `Открытого кредита нет. Максимум сейчас: **${num(o.max_amount)} 🪙** — при платеже 100% зарплаты (${num(o.salary_daily)} 🪙/день).`,
       `Минимальная сумма: **${num(o.min_amount)} 🪙**`
     );
+  } else {
+    lines.push('', 'Кредит дают за роль активностей: без дневной зарплаты платить нечем. Список ролей — `/roles`.');
   }
 
   lines.push(
     '',
-    '*Неделя:* ставка +1% каждый день (1% → 7%), максимум 15%.',
-    '*Месяц:* 0,5% каждый день, после срока ставка начинает расти с 1%.',
-    'Проценты списываются с баланса каждый день — **баланс может уйти в минус**. Пока кредит не погашен целиком, второй не выдают. Проценты уходят роли-получателю.'
+    `Ставка: ${rateText(o.day_rate)} в день от остающегося долга, весь процент уходит роли, которая собирает проигрыши и комиссии.`,
+    'Платёж списывается с баланса автоматически раз в сутки. Пока кредит не погашен целиком, второй не выдают.'
   );
 
   return embed.setDescription(lines.join('\n'));
@@ -592,6 +624,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const guildId = interaction.guild?.id || null;
       const avatar = interaction.user.displayAvatarURL({ size: 128 });
 
+      // The loan is measured against the activity salary, so the mirror has to be fresh
+      if (interaction.member?.roles?.cache) await syncMemberSalary(interaction.member).catch(() => {});
+
       if (sub === 'info') {
         await interaction.deferReply(EPHEMERAL);
         return interaction.editReply({ embeds: [loanEmbed(await db.loanOffer(userId))] });
@@ -599,9 +634,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
       if (sub === 'take') {
         const amount = interaction.options.getInteger('amount');
-        const term = interaction.options.getString('term');
+        const percent = interaction.options.getInteger('percent') || 100;
         await interaction.deferReply(EPHEMERAL);
-        const o = await db.takeLoan(userId, amount, term, username, avatar, guildId);
+        const o = await db.takeLoan(userId, amount, percent, username, avatar, guildId);
         return interaction.editReply({
           embeds: [loanEmbed(o).setTitle(`✅ КРЕДИТ ВЫДАН: ${num(amount)} 🪙`)],
         });
@@ -614,7 +649,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         if (!current.loan) return interaction.editReply({ content: '❌ У тебя нет открытого кредита.' });
         const amount = requested || Math.min(current.loan.remaining, Math.max(current.balance, 0));
         if (amount < 1) {
-          return interaction.editReply({ content: '❌ Баланс в минусе — погашать нечем. Монеты придут с зарплатой или победами.' });
+          return interaction.editReply({ content: '❌ Нечем гасить. Монеты придут с зарплатой или победами.' });
         }
         const o = await db.repayLoan(userId, amount);
         const closed = !o.loan;
@@ -776,16 +811,17 @@ client.on(Events.MessageCreate, async (message) => {
 
     if (cmd === 'loan' || cmd === 'кредит') {
       const amount = parseAmount();
-      const term = args.find((a) => /^(week|month|неделя|месяц|нед|мес)$/i.test(a));
+      const percentArg = args.find((a) => /^\d{2,3}$/.test(a) && Number(a) >= 10 && Number(a) <= 100);
+      const percent = Number(percentArg) || 100;
       const avatar = message.author.displayAvatarURL({ size: 128 });
       const guildId = message.guild?.id || null;
 
-      if (term && amount) {
-        const normalized = /^(month|месяц|мес)$/i.test(term) ? 'month' : 'week';
-        const o = await db.takeLoan(message.author.id, amount, normalized, authorName, avatar, guildId);
+      if (amount) {
+        if (message.member?.roles?.cache) await syncMemberSalary(message.member).catch(() => {});
+        const o = await db.takeLoan(message.author.id, amount, percent, authorName, avatar, guildId);
         return message.reply({ embeds: [loanEmbed(o).setTitle(`✅ КРЕДИТ ВЫДАН: ${num(amount)} 🪙`)] });
       }
-      if (amount) return message.reply('❌ Укажи срок: `!loan 5000 week` или `!loan 5000 month`.');
+      if (message.member?.roles?.cache) await syncMemberSalary(message.member).catch(() => {});
       const o = await db.loanOffer(message.author.id);
       return message.reply({ embeds: [loanEmbed(o)] });
     }
@@ -794,7 +830,7 @@ client.on(Events.MessageCreate, async (message) => {
       const current = await db.loanOffer(message.author.id);
       if (!current.loan) return message.reply('❌ У тебя нет открытого кредита.');
       const amount = parseAmount() || Math.min(current.loan.remaining, Math.max(current.balance, 0));
-      if (amount < 1) return message.reply('❌ Баланс в минусе — погашать нечем. Монеты придут с зарплатой или победами.');
+      if (amount < 1) return message.reply('❌ Нечем гасить. Монеты придут с зарплатой или победами.');
       const o = await db.repayLoan(message.author.id, amount);
       return message.reply({
         embeds: [loanEmbed(o).setTitle(o.loan ? `🔄 ПОГАШЕНО ${num(amount)} 🪙` : '✅ КРЕДИТ ПОЛНОСТЬЮ ПОГАШЕН')],
@@ -810,8 +846,8 @@ client.on(Events.MessageCreate, async (message) => {
         `• \`/pay @user сумма\` или \`!pay @user сумма\` — перевести монеты (комиссия 15% уходит роли-получателю)\n` +
         `• \`/leaderboard\` или \`!leaderboard\` — топ богатейших участников\n` +
         `• \`/upgrader\` или \`!upgrader\` — ссылка на сайт Upgrader\n` +
-        `• \`/loan info\` или \`!loan\` — мой кредит и доступный лимит\n` +
-        `• \`/loan take\` или \`!loan 5000 week\` — взять кредит (неделя или месяц)\n` +
+        `• \`/loan info\` или \`!loan\` — мой кредит, зарплата и доступный максимум\n` +
+        `• \`/loan take\` или \`!loan 5000 50\` — взять кредит: сумма и доля дневной зарплаты на погашение (10–100, по умолчанию 100)\n` +
         `• \`/loan repay\` или \`!repay 2000\` — погасить кредит\n\n` +
         `👑 **Команды Лидера / Администратора:**\n` +
         `• \`/give @user сумма\` или \`!give @user сумма\` — начислить монеты участнику\n` +
@@ -820,7 +856,7 @@ client.on(Events.MessageCreate, async (message) => {
         `• \`/set_earnings_role @роль\` или \`!earnings_role @роль\` — кто получает проигрыши и комиссии\n` +
         `• \`/set_salary_source\` или \`!salary_source print|pool\` — зарплаты печатать или снимать с этой роли\n` +
         `• \`/earnings\` или \`!earnings\` — текущие настройки и участники роли\n\n` +
-        `⚠️ Кредит: проценты списываются с баланса каждый день, баланс может уйти в минус. Пока кредит не погашен целиком — новый не выдать.`
+        `⚠️ Кредит: раз в сутки с баланса автоматически списывают фиксированный платёж (часть твоей дневной зарплаты). Пока кредит открыт, на балансе должен оставаться запас в один платёж — его нельзя поставить или перевести. Новый кредит — после полного погашения.`
       );
     }
   } catch (err) {

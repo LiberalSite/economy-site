@@ -21,7 +21,7 @@ export default function Navbar({ activeTab, setActiveTab, onScrollTo, user, onOp
           <div className="w-9 h-9 lg:w-10 lg:h-10 bg-gradient-to-tr from-sky-600 to-blue-700 flex items-center justify-center font-orbitron font-black text-white text-xs lg:text-sm shadow-sm">
             LG
           </div>
-          <span className="font-orbitron font-black text-base sm:text-2xl tracking-wider">
+          <span className="hidden sm:inline font-orbitron font-black text-base sm:text-2xl tracking-wider">
             ECONOMY
           </span>
         </div>
@@ -168,7 +168,7 @@ export default function Navbar({ activeTab, setActiveTab, onScrollTo, user, onOp
             }`}
           >
             <span className="hidden lg:inline">PAY &amp; LOANS</span>
-            <span className="lg:hidden">КРЕДИТ</span>
+            <span className="lg:hidden">LOANS</span>
           </button>
         </nav>
       </div>

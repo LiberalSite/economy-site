@@ -1,34 +1,37 @@
-// Mirrors public.loan_day_rate / public.loan_term_days in supabase-schema.sql.
-// Week: the rate climbs 1 p.p. per day (day 1 = 1%, day 7 = 7%, overdue keeps climbing), capped at 15%.
-// Month: 0.5% a day inside the term, and once overdue the same climbing ladder starts from 1%.
+// Mirrors public.loan_day_rate / public.loan_schedule / public.take_loan in supabase-schema.sql.
+// A loan is repaid by annuity: the DB takes the same daily payment every day, and that payment is
+// a share of the daily activity salary — the borrower picks the share, the whole salary is the max.
 export const LOAN_MIN = 100;
-export const DAY_RATE_CAP = 15;
+export const LOAN_DAY_RATE = 2; // % of the debt still owed, charged every day, paid to the earnings role
+export const PAYMENT_PERCENT_MIN = 10;
+export const PAYMENT_PERCENT_MAX = 100;
 export const DAY_MS = 24 * 60 * 60 * 1000;
 
-export const LOAN_TERMS = [
-  { id: 'week', days: 7, label: 'Неделя', note: 'ставка растёт каждый день' },
-  { id: 'month', days: 30, label: 'Месяц', note: '0,5% в день, дешевле' },
-];
-
-export function termDays(term) {
-  return term === 'month' ? 30 : 7;
+// floor(salary * percent / 100) — the same integer math as the database
+export function dailyPayment(salaryDaily, percent) {
+  if (!salaryDaily || salaryDaily < 1 || !percent || percent < 1) return 0;
+  return Math.floor((salaryDaily * percent) / 100);
 }
 
-export function dayRate(term, day) {
-  if (term === 'month') return day <= 30 ? 0.5 : Math.min(day - 30, DAY_RATE_CAP);
-  return Math.min(day, DAY_RATE_CAP);
+// The payment must cover the first day's interest with at least one coin left for the debt itself,
+// otherwise the loan would never shrink — that is the only real ceiling on the sum.
+export function maxLoanAmount(payment) {
+  return Math.max(payment * Math.floor(100 / LOAN_DAY_RATE) - 1, 0);
 }
 
-// FLOOR(owed * rate / 100) — same rounding as the database
-export function interestCharge(owed, term, day) {
-  return Math.floor((owed * dayRate(term, day)) / 100);
-}
-
-export function totalPercent(term) {
-  const days = termDays(term);
-  let sum = 0;
-  for (let d = 1; d <= days; d++) sum += dayRate(term, d);
-  return Math.round(sum * 100) / 100;
+export function loanSchedule(amount, payment) {
+  if (!Number.isFinite(amount) || amount < 1 || !Number.isFinite(payment) || payment < 1) return null;
+  let owed = amount;
+  let days = 0;
+  let total = 0;
+  while (owed > 0 && days < 400) {
+    const interest = Math.floor((owed * LOAN_DAY_RATE) / 100);
+    const pay = Math.min(payment, owed + interest);
+    owed = Math.max(owed - (pay - interest), 0);
+    total += pay;
+    days++;
+  }
+  return { days, total, interest: total - amount };
 }
 
 export function formatPercent(value) {

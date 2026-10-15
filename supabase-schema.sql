@@ -55,8 +55,19 @@ CREATE TABLE IF NOT EXISTS public.earnings_pool (
   PRIMARY KEY (guild_id, discord_id)
 );
 
--- One open loan per borrower. Interest is charged per whole day straight from the balance,
--- which is exactly what can push a borrower into the negative.
+-- One open loan per borrower, repaid by annuity: the DB takes the same fixed amount every day
+-- straight from the balance. daily_payment can never be bigger than the member's daily salary,
+-- so the loan is always affordable; total_due/term_days are what the schedule worked out at issue.
+-- The old week/month table is replaced on purpose: no loan could exist in it yet, the feature
+-- was never live, so nothing is lost. Balances and logs are untouched. If rows somehow exist,
+-- the run stops here instead of deleting them.
+DO $do$
+BEGIN
+  IF to_regclass('public.loans') IS NOT NULL AND EXISTS (SELECT 1 FROM public.loans) THEN
+    RAISE EXCEPTION 'public.loans holds rows — close or migrate them before replacing the table';
+  END IF;
+END $do$;
+DROP TABLE IF EXISTS public.loans;
 CREATE TABLE IF NOT EXISTS public.loans (
   id BIGSERIAL PRIMARY KEY,
   discord_id TEXT NOT NULL,
@@ -64,10 +75,11 @@ CREATE TABLE IF NOT EXISTS public.loans (
   principal BIGINT NOT NULL,
   repaid BIGINT NOT NULL DEFAULT 0,
   interest_paid BIGINT NOT NULL DEFAULT 0,
-  term TEXT NOT NULL CHECK (term IN ('week', 'month')),
+  daily_payment BIGINT NOT NULL,
+  total_due BIGINT NOT NULL,
+  term_days INT NOT NULL,
   days_charged INT NOT NULL DEFAULT 0,
   started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  due_at TIMESTAMPTZ NOT NULL,
   status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'closed')),
   closed_at TIMESTAMPTZ,
   updated_at TIMESTAMPTZ DEFAULT NOW()
@@ -77,6 +89,10 @@ CREATE TABLE IF NOT EXISTS public.loans (
 ALTER TABLE public.users ALTER COLUMN username DROP DEFAULT;
 ALTER TABLE public.users ADD COLUMN IF NOT EXISTS bonus_spins INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE public.users ADD COLUMN IF NOT EXISTS bonus_expires_at TIMESTAMPTZ;
+-- The loan daily payment is a share of the salary that comes from the Discord activity role, which
+-- the database cannot see. The bot mirrors the role and its salary onto the user row.
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS salary_daily BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS activity_role TEXT;
 ALTER TABLE public.users ALTER COLUMN balance TYPE BIGINT;
 UPDATE public.users SET balance = 0 WHERE balance IS NULL;
 ALTER TABLE public.users ALTER COLUMN balance SET NOT NULL;
@@ -178,6 +194,20 @@ END $$;
 -- Transfer with a 15% commission: the sender pays p_pay, the target receives p_pay - fee,
 -- the fee is handed to the earnings role right away.
 DROP FUNCTION IF EXISTS public.transfer_coins(TEXT, TEXT, BIGINT, TEXT, TEXT);
+-- While a loan is open the borrower must always keep one daily payment on the account, so the
+-- scheduled charge can never fail. Spending (bets, transfers, bonus rounds) is allowed down to
+-- that reserve and not further; receiving coins and repaying stay allowed.
+DROP FUNCTION IF EXISTS public.loan_blocks_spend(TEXT);
+CREATE OR REPLACE FUNCTION public.loan_reserve(p_discord_id TEXT)
+RETURNS BIGINT
+LANGUAGE sql STABLE AS $$
+  SELECT COALESCE((
+    SELECT daily_payment FROM public.loans
+     WHERE discord_id = p_discord_id AND status = 'active'
+     ORDER BY id LIMIT 1
+  ), 0);
+$$;
+
 CREATE OR REPLACE FUNCTION public.transfer_coins(
   p_sender TEXT, p_target TEXT, p_pay BIGINT,
   p_sender_name TEXT DEFAULT NULL, p_target_name TEXT DEFAULT NULL, p_guild_id TEXT DEFAULT NULL
@@ -187,6 +217,8 @@ DECLARE
   v_fee BIGINT;
   v_recv BIGINT;
   v_collected BIGINT;
+  v_reserve BIGINT;
+  v_before BIGINT;
   v_sender public.users;
   v_target public.users;
 BEGIN
@@ -203,11 +235,15 @@ BEGIN
   -- lock both rows in a stable order so concurrent transfers can't deadlock
   PERFORM 1 FROM public.users WHERE discord_id IN (p_sender, p_target) ORDER BY discord_id FOR UPDATE;
 
+  SELECT balance INTO v_before FROM public.users WHERE discord_id = p_sender;
+  IF COALESCE(v_before, 0) < p_pay THEN RAISE EXCEPTION 'INSUFFICIENT_FUNDS'; END IF;
+  v_reserve := public.loan_reserve(p_sender);
+  IF v_before - p_pay < v_reserve THEN RAISE EXCEPTION 'LOAN_RESERVE'; END IF;
+
   UPDATE public.users
      SET balance = balance - p_pay, username = COALESCE(p_sender_name, username), updated_at = NOW()
-   WHERE discord_id = p_sender AND balance >= p_pay
+   WHERE discord_id = p_sender
   RETURNING * INTO v_sender;
-  IF NOT FOUND THEN RAISE EXCEPTION 'INSUFFICIENT_FUNDS'; END IF;
 
   UPDATE public.users
      SET balance = balance + v_recv, username = COALESCE(p_target_name, username), updated_at = NOW()
@@ -225,7 +261,8 @@ BEGIN
     'paid', p_pay,
     'received', v_recv,
     'fee', v_fee,
-    'fee_paid_out', v_collected
+    'fee_paid_out', v_collected,
+    'reserve', v_reserve
   );
 END $$;
 
@@ -248,6 +285,7 @@ DECLARE
   v_bonus_expires TIMESTAMPTZ;
   v_bonus_used BOOLEAN := FALSE;
   v_collected BIGINT := 0;
+  v_reserve BIGINT := 0;
   v_window_start TIMESTAMPTZ := NOW() - INTERVAL '24 hours';
 BEGIN
   IF p_bet IS NULL OR p_bet < 1 THEN RAISE EXCEPTION 'INVALID_BET'; END IF;
@@ -271,11 +309,15 @@ BEGIN
   v_win := random() * 100 < p_chance;
   v_payout := CASE WHEN v_win THEN FLOOR(p_bet * v_mult)::BIGINT ELSE 0 END;
 
+  SELECT balance INTO v_balance FROM public.users WHERE discord_id = p_discord_id FOR UPDATE;
+  IF COALESCE(v_balance, 0) < p_bet THEN RAISE EXCEPTION 'INSUFFICIENT_FUNDS'; END IF;
+  v_reserve := public.loan_reserve(p_discord_id);
+  IF v_balance - p_bet < v_reserve THEN RAISE EXCEPTION 'LOAN_RESERVE'; END IF;
+
   UPDATE public.users
      SET balance = balance - p_bet + v_payout, updated_at = NOW()
-   WHERE discord_id = p_discord_id AND balance >= p_bet
+   WHERE discord_id = p_discord_id
   RETURNING balance INTO v_balance;
-  IF NOT FOUND THEN RAISE EXCEPTION 'INSUFFICIENT_FUNDS'; END IF;
 
   IF NOT v_win THEN v_collected := distribute_earnings(p_bet, p_guild_id); END IF;
 
@@ -335,9 +377,11 @@ LANGUAGE sql IMMUTABLE AS $$
   ];
 $$;
 
--- Sell p_count extra rounds; they all burn at the next quota reset.
+-- Sell p_count extra rounds; they all burn at the next quota reset. The price is not burned:
+-- it goes to the earnings role, the same one that collects losses and transfer fees.
 DROP FUNCTION IF EXISTS public.buy_bonus_spin(TEXT);
-CREATE OR REPLACE FUNCTION public.buy_bonus_spin(p_discord_id TEXT, p_count INT DEFAULT 1)
+DROP FUNCTION IF EXISTS public.buy_bonus_spin(TEXT, INT);
+CREATE OR REPLACE FUNCTION public.buy_bonus_spin(p_discord_id TEXT, p_count INT DEFAULT 1, p_guild_id TEXT DEFAULT NULL)
 RETURNS JSONB
 LANGUAGE plpgsql AS $$
 DECLARE
@@ -349,6 +393,8 @@ DECLARE
   v_current_expires TIMESTAMPTZ;
   v_cost BIGINT;
   v_costs BIGINT[];
+  v_reserve BIGINT;
+  v_collected BIGINT := 0;
   v_next_reset TIMESTAMPTZ;
 BEGIN
   IF p_count IS NULL OR p_count < 1 OR p_count > 3 THEN RAISE EXCEPTION 'INVALID_COUNT'; END IF;
@@ -365,18 +411,23 @@ BEGIN
   v_cost := v_costs[p_count];
   v_next_reset := COALESCE(v_oldest + INTERVAL '24 hours', NOW() + INTERVAL '24 hours');
 
+  IF v_balance < v_cost THEN RAISE EXCEPTION 'INSUFFICIENT_FUNDS'; END IF;
+  v_reserve := public.loan_reserve(p_discord_id);
+  IF v_balance - v_cost < v_reserve THEN RAISE EXCEPTION 'LOAN_RESERVE'; END IF;
+
   UPDATE public.users
      SET balance = balance - v_cost,
          bonus_spins = (CASE WHEN v_current_expires > NOW() THEN v_current_bonus ELSE 0 END) + p_count,
          bonus_expires_at = v_next_reset,
          updated_at = NOW()
-   WHERE discord_id = p_discord_id AND balance >= v_cost;
-  IF NOT FOUND THEN RAISE EXCEPTION 'INSUFFICIENT_FUNDS'; END IF;
+   WHERE discord_id = p_discord_id;
 
-  INSERT INTO public.logs (type, discord_id, amount)
-  VALUES ('bonus_spin_purchase', p_discord_id, v_cost);
+  v_collected := public.distribute_earnings(v_cost, p_guild_id);
 
-  RETURN upgrader_quota(p_discord_id) || jsonb_build_object('cost', v_cost, 'count', p_count);
+  INSERT INTO public.logs (type, discord_id, amount, fee)
+  VALUES ('bonus_spin_purchase', p_discord_id, v_cost, v_cost);
+
+  RETURN upgrader_quota(p_discord_id) || jsonb_build_object('cost', v_cost, 'count', p_count, 'paid_to_role', v_collected);
 END $$;
 
 -- Leader settings, written by the bot
@@ -409,6 +460,25 @@ BEGIN
   FROM jsonb_to_recordset(p_items) AS x(id TEXT, username TEXT)
   WHERE x.id IS NOT NULL
   ON CONFLICT (guild_id, discord_id) DO UPDATE SET username = EXCLUDED.username;
+  GET DIAGNOSTICS v_count = ROW_COUNT;
+  RETURN v_count;
+END $$;
+
+-- Mirror of the Discord activity roles: the bot sends every member with their daily salary
+-- (0 when they hold no activity role). The daily salary is what a loan is measured against.
+CREATE OR REPLACE FUNCTION public.sync_activity(p_items JSONB)
+RETURNS INT
+LANGUAGE plpgsql AS $$
+DECLARE
+  v_count INT;
+BEGIN
+  INSERT INTO public.users (discord_id, salary_daily, activity_role)
+  SELECT x.id, COALESCE(x.salary, 0), x.role
+    FROM jsonb_to_recordset(p_items) AS x(id TEXT, salary BIGINT, role TEXT)
+   WHERE x.id IS NOT NULL
+  ON CONFLICT (discord_id) DO UPDATE
+    SET salary_daily = EXCLUDED.salary_daily,
+        activity_role = EXCLUDED.activity_role;
   GET DIAGNOSTICS v_count = ROW_COUNT;
   RETURN v_count;
 END $$;
@@ -510,23 +580,51 @@ BEGIN
 END $$;
 
 -- ─── Loans ───
--- Weekly loan: rate climbs by 1 p.p. every day (day 1 = 1%, day 7 = 7%, overdue days keep climbing) up to 15%.
--- Monthly loan: 0.5% a day while inside the term (cheaper than 1%), and once it is overdue the same
--- climbing ladder starts from 1%. Interest is always charged on the principal that is still owed.
-CREATE OR REPLACE FUNCTION public.loan_day_rate(p_term TEXT, p_day INT)
+-- Annuity loans: the DB takes the same fixed amount every day straight from the balance. That
+-- daily payment is a share of the member's daily activity salary (the member picks the share,
+-- the whole salary is the maximum), so a payment is always affordable. Interest is
+-- loan_day_rate() % of the debt that is still owed and goes to the earnings role — the same role
+-- that collects lost bets and transfer fees.
+DROP FUNCTION IF EXISTS public.loan_day_rate(TEXT, INT);
+CREATE OR REPLACE FUNCTION public.loan_day_rate()
 RETURNS NUMERIC
 LANGUAGE sql IMMUTABLE AS $$
-  SELECT CASE
-    WHEN p_term = 'month' AND p_day <= 30 THEN 0.5
-    WHEN p_term = 'month' THEN LEAST((p_day - 30)::NUMERIC, 15)
-    ELSE LEAST(p_day::NUMERIC, 15)
-  END;
+  SELECT 2;
 $$;
 
-CREATE OR REPLACE FUNCTION public.loan_term_days(p_term TEXT)
-RETURNS INT
+DROP FUNCTION IF EXISTS public.loan_term_days(TEXT);
+DROP FUNCTION IF EXISTS public.loan_rate_preview(TEXT);
+
+-- The whole repayment plan for a fixed daily payment: how many days the debt lasts and the sum
+-- the borrower hands over in total. Same integer math as accrue_loans, so a preview never lies.
+CREATE OR REPLACE FUNCTION public.loan_schedule(p_amount BIGINT, p_daily_payment BIGINT)
+RETURNS JSONB
+LANGUAGE plpgsql IMMUTABLE AS $$
+DECLARE
+  v_owed BIGINT := p_amount;
+  v_rate NUMERIC := public.loan_day_rate();
+  v_days INT := 0;
+  v_total BIGINT := 0;
+  v_interest BIGINT;
+  v_pay BIGINT;
+BEGIN
+  IF p_amount IS NULL OR p_amount < 1 OR p_daily_payment IS NULL OR p_daily_payment < 1 THEN RETURN NULL; END IF;
+  WHILE v_owed > 0 AND v_days < 400 LOOP
+    v_interest := FLOOR(v_owed * v_rate / 100)::BIGINT;
+    v_pay := LEAST(p_daily_payment, v_owed + v_interest);
+    v_owed := GREATEST(v_owed - (v_pay - v_interest), 0);
+    v_total := v_total + v_pay;
+    v_days := v_days + 1;
+  END LOOP;
+  RETURN jsonb_build_object('days', v_days, 'total', v_total, 'interest', v_total - p_amount);
+END $$;
+
+-- The largest loan the chosen payment can service: the first day's interest has to stay below the
+-- daily payment, otherwise the debt would never shrink.
+CREATE OR REPLACE FUNCTION public.loan_max_amount(p_daily_payment BIGINT)
+RETURNS BIGINT
 LANGUAGE sql IMMUTABLE AS $$
-  SELECT CASE WHEN p_term = 'month' THEN 30 ELSE 7 END;
+  SELECT GREATEST(COALESCE(p_daily_payment, 0) * FLOOR(100 / public.loan_day_rate())::BIGINT - 1, 0);
 $$;
 
 -- Charge every whole day that passed since the last charge. Runs before any loan is read or touched,
@@ -537,12 +635,15 @@ LANGUAGE plpgsql AS $$
 DECLARE
   l RECORD;
   v_target INT;
-  v_charge BIGINT;
-  v_rate NUMERIC;
+  v_rate NUMERIC := public.loan_day_rate();
   v_owed BIGINT;
+  v_interest BIGINT;
+  v_pay BIGINT;
+  v_body BIGINT;
   v_loans INT := 0;
-  v_interest BIGINT := 0;
-  v_loan_interest BIGINT := 0;
+  v_collected BIGINT := 0;
+  v_loan_paid BIGINT := 0;
+  v_interest_total BIGINT := 0;
   v_paid_out BIGINT := 0;
 BEGIN
   FOR l IN
@@ -553,51 +654,68 @@ BEGIN
     v_target := FLOOR(EXTRACT(EPOCH FROM (NOW() - l.started_at)) / 86400)::INT;
     -- a loan nobody touched for years must not lock the transaction in a long loop
     IF v_target > l.days_charged + 400 THEN v_target := l.days_charged + 400; END IF;
-    v_loan_interest := 0;
+    v_loan_paid := 0;
 
     WHILE l.days_charged < v_target LOOP
-      l.days_charged := l.days_charged + 1;
       v_owed := GREATEST(l.principal - l.repaid, 0);
-      IF v_owed > 0 THEN
-        v_rate := public.loan_day_rate(l.term, l.days_charged);
-        v_charge := FLOOR(v_owed * v_rate / 100)::BIGINT;
-        IF v_charge > 0 THEN
-          UPDATE public.users SET balance = balance - v_charge, updated_at = NOW() WHERE discord_id = l.discord_id;
-          UPDATE public.loans
-             SET days_charged = l.days_charged,
-                 interest_paid = interest_paid + v_charge,
-                 updated_at = NOW()
-           WHERE id = l.id;
-          INSERT INTO public.logs (type, discord_id, amount, fee)
-          VALUES ('loan_interest', l.discord_id, v_charge, 0);
-          v_paid_out := v_paid_out + public.distribute_earnings(v_charge, l.guild_id);
-          v_loan_interest := v_loan_interest + v_charge;
-        END IF;
-      END IF;
+      EXIT WHEN v_owed <= 0;
+
+      v_interest := FLOOR(v_owed * v_rate / 100)::BIGINT;
+      v_pay := LEAST(l.daily_payment, v_owed + v_interest);
+      v_body := v_pay - v_interest;
+      l.days_charged := l.days_charged + 1;
+      l.repaid := l.repaid + v_body;
+      l.interest_paid := l.interest_paid + v_interest;
+
+      UPDATE public.users SET balance = balance - v_pay, updated_at = NOW() WHERE discord_id = l.discord_id;
+      UPDATE public.loans
+         SET days_charged = l.days_charged,
+             repaid = l.repaid,
+             interest_paid = l.interest_paid,
+             status = CASE WHEN l.repaid >= l.principal THEN 'closed' ELSE 'active' END,
+             closed_at = CASE WHEN l.repaid >= l.principal THEN NOW() ELSE closed_at END,
+             updated_at = NOW()
+       WHERE id = l.id;
+      INSERT INTO public.logs (type, discord_id, amount, fee)
+      VALUES ('loan_payment', l.discord_id, v_pay, v_interest);
+
+      v_paid_out := v_paid_out + public.distribute_earnings(v_interest, l.guild_id);
+      v_collected := v_collected + v_pay;
+      v_loan_paid := v_loan_paid + v_pay;
+      v_interest_total := v_interest_total + v_interest;
+      IF l.repaid >= l.principal THEN EXIT; END IF;
     END LOOP;
 
-    v_interest := v_interest + v_loan_interest;
-    IF v_loan_interest > 0 THEN v_loans := v_loans + 1; END IF;
+    IF v_loan_paid > 0 THEN v_loans := v_loans + 1; END IF;
   END LOOP;
 
-  RETURN jsonb_build_object('loans', v_loans, 'interest', v_interest, 'paid_to_role', v_paid_out);
+  RETURN jsonb_build_object('loans', v_loans, 'collected', v_collected,
+    'interest', v_interest_total, 'paid_to_role', v_paid_out);
 END $$;
 
--- Full picture for one borrower: what they own, what they may borrow, and the open loan
+-- Full picture for one borrower: the activity salary a loan is measured against, what they may
+-- borrow, and the open loan with its payment plan.
 CREATE OR REPLACE FUNCTION public.loan_offer(p_discord_id TEXT, p_username TEXT DEFAULT NULL, p_avatar TEXT DEFAULT NULL)
 RETURNS JSONB
 LANGUAGE plpgsql AS $$
 DECLARE
-  v_balance BIGINT;
-  l public.loans;
+  u public.users;
+  l RECORD;
   v_loan JSONB;
+  v_salary BIGINT;
 BEGIN
+  INSERT INTO public.users (discord_id, username, avatar)
+  VALUES (p_discord_id, p_username, p_avatar)
+  ON CONFLICT (discord_id) DO NOTHING;
+
   PERFORM public.accrue_loans(p_discord_id);
 
-  SELECT balance INTO v_balance FROM public.users WHERE discord_id = p_discord_id;
-  v_balance := COALESCE(v_balance, 0);
+  SELECT * INTO u FROM public.users WHERE discord_id = p_discord_id;
+  v_salary := GREATEST(COALESCE(u.salary_daily, 0), 0);
 
-  SELECT * INTO l FROM public.loans
+  SELECT *, (principal - repaid) AS owed, (total_due - interest_paid - repaid) AS owed_total
+    INTO l
+    FROM public.loans
    WHERE discord_id = p_discord_id AND status = 'active'
    ORDER BY id LIMIT 1;
 
@@ -608,70 +726,75 @@ BEGIN
       'principal', l.principal,
       'repaid', l.repaid,
       'interest_paid', l.interest_paid,
-      'term', l.term,
-      'term_days', public.loan_term_days(l.term),
+      'daily_payment', l.daily_payment,
+      'total_due', l.total_due,
+      'term_days', l.term_days,
       'day', l.days_charged,
+      'days_left', GREATEST(l.term_days - l.days_charged, 0),
       'started_at', l.started_at,
-      'due_at', l.due_at,
-      'overdue', l.due_at < NOW(),
-      'remaining', l.principal - l.repaid,
-      'day_rate', public.loan_day_rate(l.term, l.days_charged + 1),
-      'next_charge_at', l.started_at + ((l.days_charged + 1) || ' days')::INTERVAL
+      'due_at', l.started_at + (l.term_days::TEXT || ' days')::INTERVAL,
+      'next_charge_at', l.started_at + ((l.days_charged + 1)::TEXT || ' days')::INTERVAL,
+      'remaining', GREATEST(l.owed, 0),
+      'remaining_due', GREATEST(l.owed_total, 0),
+      'salary_percent', CASE WHEN v_salary > 0 THEN ROUND((l.daily_payment * 100)::NUMERIC / v_salary, 1) ELSE 0 END
     );
   END IF;
 
   RETURN jsonb_build_object(
     'discord_id', p_discord_id,
-    'balance', v_balance,
-    'can_borrow', CASE WHEN v_balance >= 100 AND v_loan IS NULL THEN GREATEST(v_balance * 2, 0) ELSE 0 END,
-    'max_borrow', GREATEST(v_balance * 2, 0),
+    'balance', COALESCE(u.balance, 0),
+    'salary_daily', v_salary,
+    'activity_role', u.activity_role,
+    'day_rate', public.loan_day_rate(),
     'min_amount', 100,
-    'loan', v_loan,
-    'week_rate_preview', public.loan_rate_preview('week'),
-    'month_rate_preview', public.loan_rate_preview('month')
+    'max_daily_payment', v_salary,
+    'max_amount', CASE WHEN v_loan IS NULL THEN public.loan_max_amount(v_salary) ELSE 0 END,
+    'can_borrow', (v_salary >= 1 AND v_loan IS NULL),
+    'reserve', public.loan_reserve(p_discord_id),
+    'loan', v_loan
   );
 END $$;
 
--- "Сколько придётся заплатить" табличка для интерфейса и команд
-CREATE OR REPLACE FUNCTION public.loan_rate_preview(p_term TEXT)
-RETURNS JSONB
-LANGUAGE sql AS $$
-  SELECT jsonb_build_object(
-    'term', p_term,
-    'term_days', public.loan_term_days(p_term),
-    'daily', public.loan_day_rate(p_term, 1),
-    'total_percent', CASE
-      WHEN p_term = 'month' THEN 30 * 0.5
-      ELSE (SELECT SUM(public.loan_day_rate('week', d)) FROM generate_series(1, 7) d)
-    END
-  );
-$$;
-
 CREATE OR REPLACE FUNCTION public.take_loan(
-  p_discord_id TEXT, p_amount BIGINT, p_term TEXT,
+  p_discord_id TEXT, p_amount BIGINT, p_payment_percent INT DEFAULT 100,
   p_username TEXT DEFAULT NULL, p_avatar TEXT DEFAULT NULL, p_guild_id TEXT DEFAULT NULL
 ) RETURNS JSONB
 LANGUAGE plpgsql AS $$
 DECLARE
-  v_balance BIGINT;
+  u public.users;
+  v_salary BIGINT;
+  v_payment BIGINT;
+  v_sched JSONB;
+  v_days INT;
+  v_total BIGINT;
   v_existing INT;
 BEGIN
   PERFORM public.accrue_loans(p_discord_id);
 
-  IF p_term NOT IN ('week', 'month') THEN RAISE EXCEPTION 'INVALID_TERM'; END IF;
   IF p_amount IS NULL OR p_amount < 100 THEN RAISE EXCEPTION 'INVALID_LOAN_AMOUNT'; END IF;
+  IF p_payment_percent IS NULL OR p_payment_percent < 10 OR p_payment_percent > 100 THEN
+    RAISE EXCEPTION 'INVALID_PAYMENT_PERCENT';
+  END IF;
 
   INSERT INTO public.users (discord_id, username, avatar)
   VALUES (p_discord_id, p_username, p_avatar)
   ON CONFLICT (discord_id) DO NOTHING;
 
-  SELECT balance INTO v_balance FROM public.users WHERE discord_id = p_discord_id FOR UPDATE;
-  IF v_balance < 100 THEN RAISE EXCEPTION 'LOAN_TOO_POOR'; END IF;
+  SELECT * INTO u FROM public.users WHERE discord_id = p_discord_id FOR UPDATE;
+  v_salary := GREATEST(COALESCE(u.salary_daily, 0), 0);
+  IF v_salary < 1 THEN RAISE EXCEPTION 'NO_ACTIVITY_ROLE'; END IF;
+
+  v_payment := FLOOR(v_salary::NUMERIC * p_payment_percent / 100)::BIGINT;
+  IF v_payment < 1 THEN RAISE EXCEPTION 'INVALID_PAYMENT_PERCENT'; END IF;
 
   SELECT COUNT(*) INTO v_existing FROM public.loans WHERE discord_id = p_discord_id AND status = 'active';
   IF v_existing > 0 THEN RAISE EXCEPTION 'LOAN_ACTIVE'; END IF;
 
-  IF p_amount > v_balance * 2 THEN RAISE EXCEPTION 'LOAN_LIMIT'; END IF;
+  IF p_amount > public.loan_max_amount(v_payment) THEN RAISE EXCEPTION 'LOAN_LIMIT'; END IF;
+
+  v_sched := public.loan_schedule(p_amount, v_payment);
+  v_days := (v_sched->>'days')::INT;
+  v_total := (v_sched->>'total')::BIGINT;
 
   UPDATE public.users
      SET balance = balance + p_amount,
@@ -680,8 +803,8 @@ BEGIN
          updated_at = NOW()
    WHERE discord_id = p_discord_id;
 
-  INSERT INTO public.loans (discord_id, guild_id, principal, term, due_at)
-  VALUES (p_discord_id, p_guild_id, p_amount, p_term, NOW() + (public.loan_term_days(p_term) || ' days')::INTERVAL);
+  INSERT INTO public.loans (discord_id, guild_id, principal, daily_payment, total_due, term_days)
+  VALUES (p_discord_id, p_guild_id, p_amount, v_payment, v_total, v_days);
 
   INSERT INTO public.logs (type, discord_id, amount)
   VALUES ('loan_taken', p_discord_id, p_amount);
@@ -689,8 +812,9 @@ BEGIN
   RETURN public.loan_offer(p_discord_id);
 END $$;
 
--- Pay back by hand: only from the current balance, never deeper into the minus, and only the
--- principal. Once the principal is covered the loan closes and interest stops.
+-- Pay back by hand: only from the current balance, only the debt that is still owed. Because the
+-- debt shrinks early, the remaining plan is recalculated — the borrower stops paying interest on
+-- money they already returned.
 CREATE OR REPLACE FUNCTION public.repay_loan(p_discord_id TEXT, p_amount BIGINT)
 RETURNS JSONB
 LANGUAGE plpgsql AS $$
@@ -698,6 +822,8 @@ DECLARE
   l public.loans;
   v_balance BIGINT;
   v_pay BIGINT;
+  v_left BIGINT;
+  v_sched JSONB;
 BEGIN
   PERFORM public.accrue_loans(p_discord_id);
 
@@ -709,17 +835,29 @@ BEGIN
   IF NOT FOUND THEN RAISE EXCEPTION 'NO_LOAN'; END IF;
 
   SELECT balance INTO v_balance FROM public.users WHERE discord_id = p_discord_id FOR UPDATE;
-  v_pay := LEAST(p_amount, l.principal - l.repaid, COALESCE(v_balance, 0));
+  v_pay := LEAST(p_amount, l.principal - l.repaid, GREATEST(COALESCE(v_balance, 0), 0));
   IF v_pay < 1 THEN RAISE EXCEPTION 'INSUFFICIENT_FUNDS'; END IF;
 
   UPDATE public.users SET balance = balance - v_pay, updated_at = NOW() WHERE discord_id = p_discord_id;
 
-  UPDATE public.loans
-     SET repaid = repaid + v_pay,
-         status = CASE WHEN repaid + v_pay >= principal THEN 'closed' ELSE 'active' END,
-         closed_at = CASE WHEN repaid + v_pay >= principal THEN NOW() ELSE closed_at END,
-         updated_at = NOW()
-   WHERE id = l.id;
+  v_left := l.principal - l.repaid - v_pay;
+  IF v_left > 0 THEN
+    v_sched := public.loan_schedule(v_left, l.daily_payment);
+    UPDATE public.loans
+       SET repaid = repaid + v_pay,
+           total_due = repaid + v_pay + interest_paid + (v_sched->>'total')::BIGINT,
+           term_days = days_charged + (v_sched->>'days')::INT,
+           updated_at = NOW()
+     WHERE id = l.id;
+  ELSE
+    UPDATE public.loans
+       SET repaid = repaid + v_pay,
+           total_due = repaid + v_pay + interest_paid,
+           status = 'closed',
+           closed_at = NOW(),
+           updated_at = NOW()
+     WHERE id = l.id;
+  END IF;
 
   INSERT INTO public.logs (type, discord_id, amount)
   VALUES ('loan_repaid', p_discord_id, v_pay);
@@ -732,38 +870,42 @@ REVOKE EXECUTE ON FUNCTION public.transfer_coins(TEXT, TEXT, BIGINT, TEXT, TEXT,
 REVOKE EXECUTE ON FUNCTION public.upgrader_spin(TEXT, BIGINT, NUMERIC, TEXT, TEXT, TEXT) FROM PUBLIC, anon, authenticated;
 REVOKE EXECUTE ON FUNCTION public.upgrader_quota(TEXT) FROM PUBLIC, anon, authenticated;
 REVOKE EXECUTE ON FUNCTION public.bonus_costs(BIGINT) FROM PUBLIC, anon, authenticated;
-REVOKE EXECUTE ON FUNCTION public.buy_bonus_spin(TEXT, INT) FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.buy_bonus_spin(TEXT, INT, TEXT) FROM PUBLIC, anon, authenticated;
 REVOKE EXECUTE ON FUNCTION public.distribute_earnings(BIGINT, TEXT) FROM PUBLIC, anon, authenticated;
 REVOKE EXECUTE ON FUNCTION public.set_guild_earnings_role(TEXT, TEXT) FROM PUBLIC, anon, authenticated;
 REVOKE EXECUTE ON FUNCTION public.set_guild_salary_source(TEXT, TEXT) FROM PUBLIC, anon, authenticated;
 REVOKE EXECUTE ON FUNCTION public.sync_earnings_pool(TEXT, JSONB) FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.sync_activity(JSONB) FROM PUBLIC, anon, authenticated;
 REVOKE EXECUTE ON FUNCTION public.get_guild_config(TEXT) FROM PUBLIC, anon, authenticated;
 REVOKE EXECUTE ON FUNCTION public.pay_salaries(TEXT, JSONB) FROM PUBLIC, anon, authenticated;
-REVOKE EXECUTE ON FUNCTION public.loan_day_rate(TEXT, INT) FROM PUBLIC, anon, authenticated;
-REVOKE EXECUTE ON FUNCTION public.loan_term_days(TEXT) FROM PUBLIC, anon, authenticated;
-REVOKE EXECUTE ON FUNCTION public.loan_rate_preview(TEXT) FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.loan_day_rate() FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.loan_schedule(BIGINT, BIGINT) FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.loan_max_amount(BIGINT) FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.loan_reserve(TEXT) FROM PUBLIC, anon, authenticated;
 REVOKE EXECUTE ON FUNCTION public.accrue_loans(TEXT) FROM PUBLIC, anon, authenticated;
 REVOKE EXECUTE ON FUNCTION public.loan_offer(TEXT, TEXT, TEXT) FROM PUBLIC, anon, authenticated;
-REVOKE EXECUTE ON FUNCTION public.take_loan(TEXT, BIGINT, TEXT, TEXT, TEXT, TEXT) FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.take_loan(TEXT, BIGINT, INT, TEXT, TEXT, TEXT) FROM PUBLIC, anon, authenticated;
 REVOKE EXECUTE ON FUNCTION public.repay_loan(TEXT, BIGINT) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.add_balances(JSONB) TO service_role;
 GRANT EXECUTE ON FUNCTION public.transfer_coins(TEXT, TEXT, BIGINT, TEXT, TEXT, TEXT) TO service_role;
 GRANT EXECUTE ON FUNCTION public.upgrader_spin(TEXT, BIGINT, NUMERIC, TEXT, TEXT, TEXT) TO service_role;
 GRANT EXECUTE ON FUNCTION public.upgrader_quota(TEXT) TO service_role;
 GRANT EXECUTE ON FUNCTION public.bonus_costs(BIGINT) TO service_role;
-GRANT EXECUTE ON FUNCTION public.buy_bonus_spin(TEXT, INT) TO service_role;
+GRANT EXECUTE ON FUNCTION public.buy_bonus_spin(TEXT, INT, TEXT) TO service_role;
 GRANT EXECUTE ON FUNCTION public.distribute_earnings(BIGINT, TEXT) TO service_role;
 GRANT EXECUTE ON FUNCTION public.set_guild_earnings_role(TEXT, TEXT) TO service_role;
 GRANT EXECUTE ON FUNCTION public.set_guild_salary_source(TEXT, TEXT) TO service_role;
 GRANT EXECUTE ON FUNCTION public.sync_earnings_pool(TEXT, JSONB) TO service_role;
+GRANT EXECUTE ON FUNCTION public.sync_activity(JSONB) TO service_role;
 GRANT EXECUTE ON FUNCTION public.get_guild_config(TEXT) TO service_role;
 GRANT EXECUTE ON FUNCTION public.pay_salaries(TEXT, JSONB) TO service_role;
-GRANT EXECUTE ON FUNCTION public.loan_day_rate(TEXT, INT) TO service_role;
-GRANT EXECUTE ON FUNCTION public.loan_term_days(TEXT) TO service_role;
-GRANT EXECUTE ON FUNCTION public.loan_rate_preview(TEXT) TO service_role;
+GRANT EXECUTE ON FUNCTION public.loan_day_rate() TO service_role;
+GRANT EXECUTE ON FUNCTION public.loan_schedule(BIGINT, BIGINT) TO service_role;
+GRANT EXECUTE ON FUNCTION public.loan_max_amount(BIGINT) TO service_role;
+GRANT EXECUTE ON FUNCTION public.loan_reserve(TEXT) TO service_role;
 GRANT EXECUTE ON FUNCTION public.accrue_loans(TEXT) TO service_role;
 GRANT EXECUTE ON FUNCTION public.loan_offer(TEXT, TEXT, TEXT) TO service_role;
-GRANT EXECUTE ON FUNCTION public.take_loan(TEXT, BIGINT, TEXT, TEXT, TEXT, TEXT) TO service_role;
+GRANT EXECUTE ON FUNCTION public.take_loan(TEXT, BIGINT, INT, TEXT, TEXT, TEXT) TO service_role;
 GRANT EXECUTE ON FUNCTION public.repay_loan(TEXT, BIGINT) TO service_role;
 
 NOTIFY pgrst, 'reload schema';
