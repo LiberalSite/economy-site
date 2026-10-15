@@ -168,25 +168,18 @@ body.dark-theme {
 }
 
 /* ============================================================
-   Upgrader backdrop: drifting neon glows, a tech grid and a
-   light beam. Sits behind the panels (see `isolate` + -z-10).
+   Upgrader backdrop: a blue starfield. Three layers drift and
+   twinkle at different rhythms, which reads as depth without
+   any planetary discs. Sits behind the panels (see `isolate`).
    ============================================================ */
-@keyframes upgraderDrift {
-  0%   { transform: translate3d(-4%, -3%, 0) scale(1); }
-  50%  { transform: translate3d(5%, 4%, 0) scale(1.14); }
-  100% { transform: translate3d(-4%, -3%, 0) scale(1); }
+@keyframes upgraderStarsDrift {
+  from { transform: translate3d(0, 0, 0); }
+  to   { transform: translate3d(1.6rem, -2.4rem, 0); }
 }
 
-@keyframes upgraderGridScroll {
-  from { background-position: 0 0, 0 0; }
-  to   { background-position: 0 -48px, 48px 0; }
-}
-
-@keyframes upgraderBeam {
-  0%   { transform: translateX(-40%) skewX(-18deg); opacity: 0; }
-  25%  { opacity: .5; }
-  65%  { opacity: 0; }
-  100% { transform: translateX(340%) skewX(-18deg); opacity: 0; }
+@keyframes upgraderStarsTwinkle {
+  0%, 100% { opacity: .45; }
+  50%      { opacity: 1; }
 }
 
 .upgrader-bg {
@@ -195,56 +188,72 @@ body.dark-theme {
   z-index: -10;
   overflow: hidden;
   pointer-events: none;
+  --star: rgba(219, 234, 254, 0.9);
 }
 
-.upgrader-glow {
+/* Each layer is one dot replicated by box-shadow offsets, so the whole
+   sky is a single painted element and costs nothing to animate. Offsets use
+   vw across and rem down, which keeps the density even on a phone. */
+.upgrader-stars {
   position: absolute;
-  inset: -25%;
-  filter: blur(8px);
-  background:
-    radial-gradient(closest-side, rgba(34, 211, 238, 0.30), transparent 72%) 22% 32% / 58% 58% no-repeat,
-    radial-gradient(closest-side, rgba(168, 85, 247, 0.24), transparent 72%) 78% 68% / 52% 52% no-repeat,
-    radial-gradient(closest-side, rgba(250, 204, 21, 0.16), transparent 72%) 58% 22% / 40% 40% no-repeat;
-  animation: upgraderDrift 26s ease-in-out infinite;
-}
-
-/* second glow layer, different colours and rhythm so the two never pulse together */
-.upgrader-glow-2 {
-  background:
-    radial-gradient(closest-side, rgba(236, 72, 153, 0.20), transparent 72%) 35% 72% / 50% 50% no-repeat,
-    radial-gradient(closest-side, rgba(45, 212, 191, 0.22), transparent 72%) 72% 30% / 46% 46% no-repeat;
-  animation-duration: 34s;
-  animation-direction: reverse;
-  opacity: .85;
-}
-
-.upgrader-grid {
-  position: absolute;
-  inset: 0;
-  background-image:
-    linear-gradient(rgba(56, 189, 248, 0.10) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(56, 189, 248, 0.10) 1px, transparent 1px);
-  background-size: 48px 48px;
-  -webkit-mask-image: radial-gradient(closest-side at 50% 46%, #000 12%, transparent 78%);
-  mask-image: radial-gradient(closest-side at 50% 46%, #000 12%, transparent 78%);
-  animation: upgraderGridScroll 11s linear infinite;
-}
-
-.upgrader-beam {
-  position: absolute;
-  top: -10%;
-  bottom: -10%;
+  top: 0;
   left: 0;
-  width: 24%;
-  background: linear-gradient(90deg, transparent, rgba(125, 211, 252, 0.22), transparent);
-  animation: upgraderBeam 9s ease-in-out infinite;
+  width: 1px;
+  height: 1px;
+  border-radius: 50%;
+  background: transparent;
 }
 
-.upgrader-bg.is-light { opacity: .55; }
+.upgrader-stars-far {
+  box-shadow:
+    1vw 3rem var(--star), 6vw 21rem var(--star), 11vw 8rem var(--star),
+    15vw 34rem var(--star), 19vw 14rem var(--star), 24vw 27rem var(--star),
+    28vw 4rem var(--star), 33vw 19rem var(--star), 37vw 42rem var(--star),
+    42vw 11rem var(--star), 47vw 31rem var(--star), 51vw 6rem var(--star),
+    56vw 24rem var(--star), 60vw 44rem var(--star), 65vw 16rem var(--star),
+    70vw 37rem var(--star), 75vw 9rem var(--star), 80vw 29rem var(--star),
+    85vw 45rem var(--star), 90vw 18rem var(--star), 95vw 40rem var(--star);
+  animation: upgraderStarsDrift 90s ease-in-out infinite alternate,
+             upgraderStarsTwinkle 7s ease-in-out infinite;
+}
+
+.upgrader-stars-mid {
+  --star: rgba(147, 197, 253, 0.95);
+  width: 1.6px;
+  height: 1.6px;
+  box-shadow:
+    3vw 12rem var(--star), 10vw 41rem var(--star), 17vw 22rem var(--star),
+    26vw 43rem var(--star), 34vw 6rem var(--star), 43vw 33rem var(--star),
+    52vw 17rem var(--star), 61vw 42rem var(--star), 72vw 12rem var(--star),
+    82vw 38rem var(--star), 93vw 26rem var(--star);
+  animation: upgraderStarsDrift 66s ease-in-out infinite alternate,
+             upgraderStarsTwinkle 5.2s ease-in-out infinite reverse;
+}
+
+.upgrader-stars-near {
+  --star: #eff6ff;
+  width: 2.4px;
+  height: 2.4px;
+  filter: drop-shadow(0 0 3px rgba(59, 130, 246, 0.85));
+  box-shadow:
+    8vw 28rem var(--star), 22vw 5rem var(--star), 38vw 39rem var(--star),
+    55vw 20rem var(--star), 68vw 44rem var(--star), 84vw 15rem var(--star),
+    96vw 40rem var(--star);
+  animation: upgraderStarsDrift 48s ease-in-out infinite alternate,
+             upgraderStarsTwinkle 3.8s ease-in-out infinite;
+}
+
+.upgrader-bg.is-light { opacity: .9; }
+
+/* each layer sets its own --star, so the light theme has to override it per layer */
+.upgrader-bg.is-light .upgrader-stars-far { --star: rgba(30, 64, 175, 0.32); }
+.upgrader-bg.is-light .upgrader-stars-mid { --star: rgba(29, 78, 216, 0.5); }
+.upgrader-bg.is-light .upgrader-stars-near {
+  --star: rgba(37, 99, 235, 0.8);
+  filter: drop-shadow(0 0 2px rgba(37, 99, 235, 0.35));
+}
 
 @media (prefers-reduced-motion: reduce) {
-  .upgrader-glow,
-  .upgrader-grid,
-  .upgrader-beam { animation: none; }
+  .upgrader-stars { animation: none; }
 }
 

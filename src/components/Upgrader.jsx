@@ -197,6 +197,7 @@ export default function Upgrader({
   // Color dynamics:
   // When spinning: Electric Sky Blue
   // When stopped on WIN: Vibrant Emerald Green (#10b981)
+  // When stopped on a 10k+ WIN: Bright Cyan (#22d3ee)
   // When stopped on LOSS: Vivid Crimson Red (#ef4444)
   // When idle: Classic Blue (#0284c7)
   let drumColor = "#0284c7";
@@ -208,9 +209,9 @@ export default function Upgrader({
     needleColor = "#38bdf8";
     needleStroke = "#0284c7";
   } else if (result === 'win') {
-    drumColor = isBigWin ? "#fbbf24" : "#10b981"; // GREEN on win (or gold if 10k+)
-    needleColor = isBigWin ? "#fbbf24" : "#10b981";
-    needleStroke = isBigWin ? "#d97706" : "#059669";
+    drumColor = isBigWin ? "#22d3ee" : "#10b981"; // GREEN on win (or bright cyan if 10k+)
+    needleColor = isBigWin ? "#22d3ee" : "#10b981";
+    needleStroke = isBigWin ? "#0891b2" : "#059669";
   } else if (result === 'loss') {
     drumColor = "#ef4444"; // RED on loss!
     needleColor = "#ef4444";
@@ -317,14 +318,14 @@ export default function Upgrader({
             particleCount: 160,
             spread: 100,
             origin: { y: 0.5 },
-            colors: ['#fbbf24', '#f59e0b', '#d97706', '#fef08a', '#ffffff']
+            colors: ['#22d3ee', '#38bdf8', '#2563eb', '#bae6fd', '#ffffff']
           });
           setTimeout(() => {
             confetti({
               particleCount: 80,
               spread: 60,
               origin: { y: 0.55 },
-              colors: ['#38bdf8', '#0284c7', '#fbbf24']
+              colors: ['#38bdf8', '#0284c7', '#22d3ee']
             });
           }, 250);
         } else {
@@ -332,7 +333,7 @@ export default function Upgrader({
             particleCount: 100,
             spread: 80,
             origin: { y: 0.5 },
-            colors: ['#10b981', '#34d399', '#0ea5e9', '#ffffff']
+            colors: ['#10b981', '#34d399', '#38bdf8', '#ffffff']
           });
         }
 
@@ -405,12 +406,11 @@ export default function Upgrader({
       isDark ? 'bg-[#060b17] text-white' : 'bg-[#f0f6fc] text-slate-900'
     } select-none`}>
       
-      {/* Backdrop: drifting neon glows, a scrolling tech grid and a beam sweeping past the drum */}
+      {/* Backdrop: a blue starfield in three parallax layers */}
       <div className={`upgrader-bg ${isDark ? '' : 'is-light'}`} aria-hidden="true">
-        <div className="upgrader-glow" />
-        <div className="upgrader-glow upgrader-glow-2" />
-        <div className="upgrader-grid" />
-        <div className="upgrader-beam" />
+        <div className="upgrader-stars upgrader-stars-far" />
+        <div className="upgrader-stars upgrader-stars-mid" />
+        <div className="upgrader-stars upgrader-stars-near" />
       </div>
 
       {/* Spin lock: swallow every click while the drum is running */}
@@ -449,8 +449,8 @@ export default function Upgrader({
                     className={`p-2.5 shadow-sm flex items-center justify-between gap-2 transition-all duration-200 hover:translate-x-1 animate-item-entry ${
                       isBigItem
                         ? isDark
-                          ? 'bg-gradient-to-r from-amber-950/70 via-[#182338] to-amber-900/40 shadow-[0_0_12px_rgba(245,158,11,0.25)]'
-                          : 'bg-gradient-to-r from-amber-50 to-yellow-100 shadow-[0_0_10px_rgba(245,158,11,0.2)]'
+                          ? 'bg-gradient-to-r from-sky-950/70 via-[#0f1e38] to-blue-900/40 shadow-[0_0_12px_rgba(56,189,248,0.25)]'
+                          : 'bg-gradient-to-r from-sky-50 to-blue-100 shadow-[0_0_10px_rgba(56,189,248,0.2)]'
                         : isDark
                           ? 'bg-[#121c35] hover:bg-[#162343]'
                           : 'bg-sky-50/80 hover:bg-sky-100/80'
@@ -474,7 +474,7 @@ export default function Upgrader({
                     <div className="flex items-center gap-1 shrink-0">
                       <span className={`font-orbitron font-black tabular-nums whitespace-nowrap ${sumSizeClass(sum)} ${
                         isBigItem
-                          ? 'bg-gradient-to-r from-yellow-300 via-amber-400 to-orange-400 bg-clip-text text-transparent drop-shadow-[0_0_6px_rgba(251,191,36,0.6)]'
+                          ? 'bg-gradient-to-r from-sky-300 via-cyan-300 to-blue-400 bg-clip-text text-transparent drop-shadow-[0_0_6px_rgba(56,189,248,0.6)]'
                           : 'text-emerald-400'
                       }`}>
                         {sum}
@@ -499,12 +499,12 @@ export default function Upgrader({
           {/* ======================================================== */}
           <div className={`col-span-1 lg:col-span-4 shadow-sm flex flex-col justify-between lg:h-[390px] transition-all duration-300 ${
             isDark ? 'bg-[#0d1527]' : 'bg-white'
-          } ${isBigBet ? 'shadow-[0_0_20px_rgba(245,158,11,0.15)]' : ''}`}>
+          } ${isBigBet ? 'shadow-[0_0_20px_rgba(56,189,248,0.2)]' : ''}`}>
             
             {/* Top Accent Strip */}
             <div className={`h-1 w-full transition-all duration-300 ${
               isBigBet 
-                ? 'bg-gradient-to-r from-amber-400 via-yellow-300 to-orange-500' 
+                ? 'bg-gradient-to-r from-cyan-400 via-sky-400 to-blue-500' 
                 : 'bg-gradient-to-r from-sky-500 to-blue-600'
             }`} />
 
@@ -514,7 +514,7 @@ export default function Upgrader({
               <div>
                 <div className="flex items-center justify-between pb-2 border-b border-slate-500/10">
                   <div className="flex items-center gap-1.5">
-                    <Wallet className={`w-4 h-4 ${isBigBet ? 'text-amber-400' : 'text-sky-400'}`} />
+                    <Wallet className={`w-4 h-4 ${isBigBet ? 'text-cyan-300' : 'text-sky-400'}`} />
                     <span className="text-xs font-orbitron font-black uppercase tracking-wider">
                       СТАВКА
                     </span>
@@ -534,7 +534,7 @@ export default function Upgrader({
                   <div className="flex items-center justify-center gap-2">
                     <span className={`font-orbitron font-black text-xl sm:text-3xl tracking-tight transition-all ${
                       isBigBet
-                        ? 'bg-gradient-to-r from-amber-300 via-yellow-400 to-orange-400 bg-clip-text text-transparent drop-shadow-[0_0_12px_rgba(251,191,36,0.6)]'
+                        ? 'bg-gradient-to-r from-sky-300 via-cyan-300 to-blue-400 bg-clip-text text-transparent drop-shadow-[0_0_12px_rgba(56,189,248,0.6)]'
                         : isDark ? 'text-white' : 'text-slate-900'
                     }`}>
                       {betAmount.toLocaleString()}
@@ -558,7 +558,7 @@ export default function Upgrader({
                       isDark 
                         ? 'bg-[#15203b] text-white focus:bg-[#1a294d]' 
                         : 'bg-sky-50 text-slate-900 focus:bg-sky-100'
-                    } ${isBigBet ? 'ring-1 ring-amber-400/50' : 'focus:ring-1 focus:ring-sky-500'}`}
+                    } ${isBigBet ? 'ring-1 ring-cyan-400/60' : 'focus:ring-1 focus:ring-sky-500'}`}
                   />
                   <div className="absolute right-3 pointer-events-none">
                     <CoinIcon className="w-4 h-4" />
@@ -615,7 +615,7 @@ export default function Upgrader({
                       onClick={handleBetMax}
                       className={`py-1.5 text-[10px] sm:text-xs font-orbitron font-black shadow-sm transition-all active:scale-95 ${
                         isBigBet 
-                          ? 'bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-white' 
+                          ? 'bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white' 
                           : 'bg-sky-600 hover:bg-sky-700 text-white'
                       }`}
                     >
@@ -733,12 +733,12 @@ export default function Upgrader({
                   /* WIN DISPLAY: CHEVRONS UP + WON AMOUNT (NO EXTRA TEXT) */
                   <div className="flex flex-col items-center justify-center animate-item-entry">
                     <ChevronsUp className={`w-10 h-10 sm:w-14 sm:h-14 ${
-                      isBigWin ? 'text-amber-400 drop-shadow-[0_0_20px_#fbbf24]' : 'text-emerald-400 drop-shadow-[0_0_16px_#10b981]'
+                      isBigWin ? 'text-cyan-300 drop-shadow-[0_0_20px_#22d3ee]' : 'text-emerald-400 drop-shadow-[0_0_16px_#10b981]'
                     } animate-bounce`} />
                     <div className="flex items-center gap-1.5 mt-0.5">
                       <span className={`font-orbitron font-black text-lg sm:text-2xl ${
                         isBigWin
-                          ? 'bg-gradient-to-r from-yellow-300 via-amber-400 to-orange-500 bg-clip-text text-transparent drop-shadow-[0_0_20px_rgba(251,191,36,0.9)]'
+                          ? 'bg-gradient-to-r from-sky-300 via-cyan-300 to-blue-400 bg-clip-text text-transparent drop-shadow-[0_0_20px_rgba(56,189,248,0.9)]'
                           : 'text-emerald-400'
                       }`}>
                         +{lastWonAmount.toLocaleString()}
@@ -753,7 +753,7 @@ export default function Upgrader({
                     <div className="flex items-center gap-1.5 mt-0.5">
                       <span className={`font-orbitron font-black text-lg sm:text-2xl ${
                         isBigLoss
-                          ? 'bg-gradient-to-r from-rose-400 via-red-500 to-purple-600 bg-clip-text text-transparent drop-shadow-[0_0_20px_rgba(244,63,94,0.9)]'
+                          ? 'bg-gradient-to-r from-rose-400 via-red-500 to-rose-700 bg-clip-text text-transparent drop-shadow-[0_0_20px_rgba(244,63,94,0.9)]'
                           : 'text-rose-500'
                       }`}>
                         -{lastLostAmount.toLocaleString()}
@@ -792,9 +792,9 @@ export default function Upgrader({
                 isSpinning || notEnoughBet
                   ? 'bg-slate-700 text-slate-400 cursor-not-allowed opacity-80'
                   : outOfRounds
-                    ? 'bg-gradient-to-r from-fuchsia-600 via-purple-600 to-indigo-700 hover:from-fuchsia-500 hover:to-indigo-600 text-white shadow-[0_0_16px_rgba(147,51,234,0.4)] btn-shimmer-sweep'
+                    ? 'bg-gradient-to-r from-indigo-600 via-blue-600 to-sky-600 hover:from-indigo-500 hover:to-sky-500 text-white shadow-[0_0_16px_rgba(59,130,246,0.45)] btn-shimmer-sweep'
                     : isBigPotential
-                      ? 'bg-gradient-to-r from-amber-500 via-yellow-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-slate-950 shadow-[0_0_20px_rgba(245,158,11,0.4)] btn-shimmer-sweep'
+                      ? 'bg-gradient-to-r from-cyan-400 via-sky-500 to-blue-600 hover:from-cyan-300 hover:to-blue-500 text-white shadow-[0_0_20px_rgba(56,189,248,0.45)] btn-shimmer-sweep'
                       : 'bg-gradient-to-r from-sky-500 via-sky-600 to-blue-700 hover:from-sky-400 hover:to-blue-600 text-white shadow-[0_0_16px_rgba(2,132,199,0.35)] btn-shimmer-sweep'
               }`}
             >
@@ -815,7 +815,7 @@ export default function Upgrader({
                 </>
               ) : isBigPotential ? (
                 <>
-                  <Zap className="w-4 h-4 text-slate-950" />
+                  <Zap className="w-4 h-4 text-white" />
                   <span>MEGA IMPROVE</span>
                 </>
               ) : (
@@ -826,7 +826,7 @@ export default function Upgrader({
               )}
               {!isSpinning && !pending && (
                 <span className={`font-mono text-[10px] font-black px-1.5 py-0.5 rounded ${
-                  isBigPotential && !outOfRounds ? 'bg-slate-950/25 text-slate-950' : 'bg-black/25 text-white'
+                  isBigPotential && !outOfRounds ? 'bg-sky-950/40 text-white' : 'bg-black/25 text-white'
                 }`}>
                   {quota.left}/{quota.limit}
                   {quota.bonusSpins > 0 && ` +${quota.bonusSpins}`}
@@ -852,12 +852,12 @@ export default function Upgrader({
           {/* ======================================================== */}
           <div className={`col-span-1 lg:col-span-4 shadow-sm flex flex-col justify-between lg:h-[390px] transition-all duration-300 ${
             isDark ? 'bg-[#0d1527]' : 'bg-white'
-          } ${isBigPotential ? 'shadow-[0_0_25px_rgba(245,158,11,0.2)]' : ''}`}>
+          } ${isBigPotential ? 'shadow-[0_0_25px_rgba(56,189,248,0.22)]' : ''}`}>
             
             {/* Top Accent Strip */}
             <div className={`h-1 w-full transition-all duration-300 ${
               isBigPotential 
-                ? 'bg-gradient-to-r from-amber-400 via-yellow-300 to-orange-500' 
+                ? 'bg-gradient-to-r from-cyan-400 via-sky-400 to-blue-500' 
                 : 'bg-gradient-to-r from-emerald-500 to-teal-500'
             }`} />
 
@@ -867,14 +867,14 @@ export default function Upgrader({
               <div>
                 <div className="flex items-center justify-between pb-2 border-b border-slate-500/10">
                   <div className="flex items-center gap-1.5">
-                    <Trophy className={`w-4 h-4 ${isBigPotential ? 'text-amber-400' : 'text-emerald-400'}`} />
+                    <Trophy className={`w-4 h-4 ${isBigPotential ? 'text-cyan-300' : 'text-emerald-400'}`} />
                     <span className="text-xs font-orbitron font-black uppercase tracking-wider">
                       ВЫИГРЫШ
                     </span>
                   </div>
                   <div className={`text-[11px] font-mono font-black px-2 py-0.5 ${
                     isBigPotential 
-                      ? 'bg-amber-500/20 text-amber-300' 
+                      ? 'bg-sky-500/20 text-cyan-200' 
                       : 'bg-emerald-500/15 text-emerald-400'
                   }`}>
                     x{multiplier.toFixed(2)}
@@ -889,7 +889,7 @@ export default function Upgrader({
                   <div className="flex items-center justify-center gap-2">
                     <span className={`font-orbitron font-black text-xl sm:text-3xl tracking-tight transition-all ${
                       isBigPotential
-                        ? 'bg-gradient-to-r from-amber-300 via-yellow-300 to-orange-500 bg-clip-text text-transparent drop-shadow-[0_0_16px_rgba(251,191,36,0.85)]'
+                        ? 'bg-gradient-to-r from-sky-300 via-cyan-300 to-blue-400 bg-clip-text text-transparent drop-shadow-[0_0_16px_rgba(56,189,248,0.85)]'
                         : 'text-emerald-400 drop-shadow-[0_0_10px_rgba(52,211,153,0.5)]'
                     }`}>
                       +{potentialWin.toLocaleString()}
@@ -903,7 +903,7 @@ export default function Upgrader({
                       ПРИБЫЛЬ:
                     </span>
                     <span className={`text-[11px] font-orbitron font-black ${
-                      isBigPotential ? 'text-amber-400' : 'text-emerald-400'
+                      isBigPotential ? 'text-cyan-300' : 'text-emerald-400'
                     }`}>
                       +{netProfit.toLocaleString()}
                     </span>
@@ -932,7 +932,7 @@ export default function Upgrader({
                         isDark 
                           ? 'bg-[#15203b] text-white focus:bg-[#1a294d]' 
                           : 'bg-sky-50 text-slate-900 focus:bg-sky-100'
-                      } ${isBigPotential ? 'ring-1 ring-amber-400/50' : 'focus:ring-1 focus:ring-sky-500'}`}
+                      } ${isBigPotential ? 'ring-1 ring-cyan-400/60' : 'focus:ring-1 focus:ring-sky-500'}`}
                     />
                     <span className="absolute right-3.5 top-2 text-xs font-mono font-black text-sky-400">%</span>
                   </div>
@@ -949,7 +949,7 @@ export default function Upgrader({
                         className={`py-1.5 text-[10px] sm:text-xs font-orbitron font-black shadow-sm transition-all active:scale-95 ${
                           isSelected
                             ? isBigPotential
-                              ? 'bg-amber-500 text-slate-950 shadow-md font-black'
+                              ? 'bg-cyan-400 text-slate-950 shadow-md font-black'
                               : 'bg-sky-600 text-white shadow-md'
                             : isDark
                               ? 'bg-[#15203b] hover:bg-[#1f3058] text-slate-200'
@@ -1028,7 +1028,7 @@ export default function Upgrader({
                     <div className="flex items-center gap-1 shrink-0">
                       <span className={`font-orbitron font-black tabular-nums whitespace-nowrap ${sumSizeClass(sum)} ${
                         isBigLossItem
-                          ? 'bg-gradient-to-r from-rose-400 via-red-500 to-purple-600 bg-clip-text text-transparent drop-shadow-[0_0_6px_rgba(244,63,94,0.6)]'
+                          ? 'bg-gradient-to-r from-rose-400 via-red-500 to-rose-700 bg-clip-text text-transparent drop-shadow-[0_0_6px_rgba(244,63,94,0.6)]'
                           : 'text-rose-500'
                       }`}>
                         {sum}
@@ -1055,7 +1055,7 @@ export default function Upgrader({
           >
             <div className="flex items-start justify-between gap-3">
               <div className="flex items-center gap-2">
-                <ShoppingCart className="w-5 h-5 text-fuchsia-400" />
+                <ShoppingCart className="w-5 h-5 text-sky-400" />
                 <span className="font-orbitron font-black text-sm uppercase tracking-widest">Дополнительные спины</span>
               </div>
               <button onClick={() => setShowBuy(false)} className="p-1 -mt-1 -mr-1 opacity-60 hover:opacity-100">
@@ -1079,7 +1079,7 @@ export default function Upgrader({
                       !affordable
                         ? (isDark ? 'bg-[#141d33] text-slate-600' : 'bg-slate-100 text-slate-400')
                         : selected
-                          ? 'bg-gradient-to-r from-fuchsia-600 to-purple-700 text-white shadow-[0_0_14px_rgba(147,51,234,0.4)]'
+                          ? 'bg-gradient-to-r from-sky-500 to-blue-600 text-white shadow-[0_0_14px_rgba(59,130,246,0.4)]'
                           : isDark ? 'bg-[#162343] text-slate-300 hover:bg-[#1b2b52]' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                     }`}
                   >
@@ -1098,7 +1098,7 @@ export default function Upgrader({
               Стоимость
             </p>
             <div className="flex items-end gap-2 mt-1 flex-wrap">
-              <span className="font-orbitron font-black text-2xl text-fuchsia-400">
+              <span className="font-orbitron font-black text-2xl text-sky-400">
                 {selectedCost.toLocaleString('ru-RU')}
               </span>
               <CoinIcon className="w-5 h-5 mb-1" />
@@ -1125,7 +1125,7 @@ export default function Upgrader({
                 className={`flex-1 py-2.5 font-orbitron font-black text-[11px] uppercase tracking-widest shadow-lg active:scale-95 transition-all ${
                   notEnoughBuy
                     ? 'bg-slate-700 text-slate-400 cursor-not-allowed'
-                    : 'text-white bg-gradient-to-r from-fuchsia-600 to-purple-700 hover:from-fuchsia-500 hover:to-purple-600'
+                    : 'text-white bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-400 hover:to-blue-500'
                 }`}
               >
                 {isBuying ? 'Покупка...' : notEnoughBuy ? 'Недостаточно средств' : `Купить ${buyCount}`}
