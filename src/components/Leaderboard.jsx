@@ -1,19 +1,33 @@
 import React, { useEffect, useState } from 'react';
 import { CoinIcon } from './Upgrader';
 
+// Switching to the Upgrader tab and back remounts this card, so the list lives outside the
+// component: the first fetch fills the cache and a remount paints it instantly.
+const CACHE_MS = 60_000;
+let cache = { users: [], at: 0, key: null };
+
 export default function Leaderboard({ theme, refreshKey }) {
-  const [users, setUsers] = useState([]);
+  const [users, setUsers] = useState(cache.users);
   const [error, setError] = useState(null);
+  const [loading, setLoading] = useState(cache.users.length === 0);
   const isDark = theme === 'dark';
 
   useEffect(() => {
+    // refreshKey means something just changed the economy (a transfer, a loan) — always reload
+    if (cache.key === refreshKey && Date.now() - cache.at < CACHE_MS) {
+      setUsers(cache.users);
+      return;
+    }
     fetch('/api/economy/leaderboard')
       .then((res) => res.json())
       .then((data) => {
-        if (data.success && Array.isArray(data.users)) setUsers(data.users);
-        else setError(data.error || 'Не удалось загрузить лидерборд');
+        if (data.success && Array.isArray(data.users)) {
+          setUsers(data.users);
+          cache = { users: data.users, at: Date.now(), key: refreshKey };
+        } else setError(data.error || 'Не удалось загрузить лидерборд');
       })
-      .catch(() => setError('Сетевая ошибка'));
+      .catch(() => setError('Сетевая ошибка'))
+      .finally(() => setLoading(false));
   }, [refreshKey]);
 
   return (
@@ -35,7 +49,7 @@ export default function Leaderboard({ theme, refreshKey }) {
             </span>
           </li>
         ))}
-        {users.length === 0 && <li className="text-gray-500">{error || 'Нет данных'}</li>}
+        {users.length === 0 && <li className="text-gray-500">{error || (loading ? 'Загружаем...' : 'Нет данных')}</li>}
       </ul>
     </div>
   );

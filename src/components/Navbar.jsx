@@ -4,6 +4,17 @@ import { LogIn, ChevronsUp, Globe, Moon, Sun, Plus } from 'lucide-react';
 import AnimatedCounter from './AnimatedCounter';
 import { CoinIcon } from './Upgrader';
 
+// A 10-digit balance would stretch this chip and shove the whole navbar sideways, so big sums are
+// shortened here. The exact number stays in the Upgrader card and in the profile window.
+const compact = (value) => {
+  const v = Math.round(Number(value) || 0);
+  const abs = Math.abs(v);
+  const sign = v < 0 ? '-' : '';
+  if (abs >= 1e9) return `${sign}${(abs / 1e9).toFixed(2).replace('.', ',')} млрд`;
+  if (abs >= 1e6) return `${sign}${(abs / 1e6).toFixed(2).replace('.', ',')} млн`;
+  return abs.toLocaleString('ru-RU');
+};
+
 export default function Navbar({ activeTab, setActiveTab, onScrollTo, user, onOpenAuthModal, userBalance, onAddCoins, theme, onToggleTheme, isSpinning = false }) {
   const isDark = theme === 'dark';
 
@@ -32,11 +43,12 @@ export default function Navbar({ activeTab, setActiveTab, onScrollTo, user, onOp
           {/* Balance Display with smooth animation and CoinIcon */}
           <div className={`flex items-center gap-1.5 px-2.5 py-1.5 lg:px-4 lg:py-2 font-orbitron text-[10px] lg:text-xs font-black shadow-sm ${
             isDark ? 'bg-[#0f172a] text-slate-100' : 'bg-sky-50 text-slate-800'
-          }`}>
+          }`} title={`${userBalance.toLocaleString('ru-RU')} 🪙`}>
             <span className="hidden sm:inline">БАЛАНС:</span>
-            <AnimatedCounter 
-              value={userBalance} 
-              className="text-sky-500 text-xs lg:text-sm font-black" 
+            <AnimatedCounter
+              value={userBalance}
+              format={compact}
+              className="text-sky-500 text-xs lg:text-sm font-black tabular-nums text-right min-w-[46px] sm:min-w-[54px] lg:min-w-[70px]"
             />
             <CoinIcon className="w-3.5 h-3.5 lg:w-4 lg:h-4 ml-0.5" />
             {!user && (

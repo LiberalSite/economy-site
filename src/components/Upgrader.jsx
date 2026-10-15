@@ -11,6 +11,7 @@ import {
   Trophy,
   Zap,
   ShoppingCart,
+  AlertTriangle,
   X
 } from 'lucide-react';
 import useSpinQuota from '../hooks/useSpinQuota';
@@ -228,6 +229,7 @@ export default function Upgrader({
 
   const roundsLeft = quota.left + quota.bonusSpins;
   const outOfRounds = !pending && roundsLeft <= 0;
+  const notEnoughBet = !pending && !outOfRounds && (betAmount < 1 || betAmount > wagerable);
 
   const spin = async () => {
     if (isSpinning) return;
@@ -393,14 +395,24 @@ export default function Upgrader({
   });
 
   const selectedCost = quota.bonusCosts[buyCount - 1] ?? quota.bonusCost;
+  const spendable = Math.max(Math.floor(userBalance) - reserve, 0);
+  const notEnoughBuy = selectedCost > spendable;
 
   const isDark = theme === 'dark';
 
   return (
-    <div className={`relative w-full flex-1 flex flex-col lg:flex-row lg:h-[calc(100svh-80px)] lg:items-stretch lg:justify-between overflow-x-hidden lg:overflow-hidden ${
+    <div className={`relative isolate w-full flex-1 flex flex-col lg:flex-row lg:h-[calc(100svh-80px)] lg:items-stretch lg:justify-between overflow-x-hidden lg:overflow-hidden ${
       isDark ? 'bg-[#060b17] text-white' : 'bg-[#f0f6fc] text-slate-900'
     } select-none`}>
       
+      {/* Backdrop: drifting neon glows, a scrolling tech grid and a beam sweeping past the drum */}
+      <div className={`upgrader-bg ${isDark ? '' : 'is-light'}`} aria-hidden="true">
+        <div className="upgrader-glow" />
+        <div className="upgrader-glow upgrader-glow-2" />
+        <div className="upgrader-grid" />
+        <div className="upgrader-beam" />
+      </div>
+
       {/* Spin lock: swallow every click while the drum is running */}
       {isSpinning && <div className="absolute inset-0 z-30 cursor-wait" onClick={(e) => e.stopPropagation()} />}
       
@@ -776,20 +788,25 @@ export default function Upgrader({
             <button
               onClick={outOfRounds ? openShop : spin}
               disabled={isSpinning}
-              className={`w-full max-w-[280px] mt-2 sm:mt-4 py-2.5 sm:py-3.5 font-orbitron font-black text-xs tracking-widest uppercase transition-all flex items-center justify-center gap-2 shadow-lg active:scale-95 btn-shimmer-sweep ${
-                isSpinning
+              className={`w-full max-w-[280px] mt-2 sm:mt-4 py-2.5 sm:py-3.5 font-orbitron font-black text-xs tracking-widest uppercase transition-all flex items-center justify-center gap-2 shadow-lg active:scale-95 ${
+                isSpinning || notEnoughBet
                   ? 'bg-slate-700 text-slate-400 cursor-not-allowed opacity-80'
                   : outOfRounds
-                    ? 'bg-gradient-to-r from-fuchsia-600 via-purple-600 to-indigo-700 hover:from-fuchsia-500 hover:to-indigo-600 text-white shadow-[0_0_16px_rgba(147,51,234,0.4)]'
+                    ? 'bg-gradient-to-r from-fuchsia-600 via-purple-600 to-indigo-700 hover:from-fuchsia-500 hover:to-indigo-600 text-white shadow-[0_0_16px_rgba(147,51,234,0.4)] btn-shimmer-sweep'
                     : isBigPotential
-                      ? 'bg-gradient-to-r from-amber-500 via-yellow-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-slate-950 shadow-[0_0_20px_rgba(245,158,11,0.4)]'
-                      : 'bg-gradient-to-r from-sky-500 via-sky-600 to-blue-700 hover:from-sky-400 hover:to-blue-600 text-white shadow-[0_0_16px_rgba(2,132,199,0.35)]'
+                      ? 'bg-gradient-to-r from-amber-500 via-yellow-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-slate-950 shadow-[0_0_20px_rgba(245,158,11,0.4)] btn-shimmer-sweep'
+                      : 'bg-gradient-to-r from-sky-500 via-sky-600 to-blue-700 hover:from-sky-400 hover:to-blue-600 text-white shadow-[0_0_16px_rgba(2,132,199,0.35)] btn-shimmer-sweep'
               }`}
             >
               {isSpinning ? (
                 <>
                   <RefreshCw className="w-4 h-4 animate-spin" />
                   <span>SPINNING...</span>
+                </>
+              ) : notEnoughBet ? (
+                <>
+                  <AlertTriangle className="w-4 h-4" />
+                  <span>НЕДОСТАТОЧНО СРЕДСТВ</span>
                 </>
               ) : outOfRounds ? (
                 <>
@@ -817,11 +834,9 @@ export default function Upgrader({
               )}
             </button>
 
-            {betAmount < 1 && !isSpinning && (
+            {reserve > 0 && betAmount < 1 && !isSpinning && (
               <p className="mt-2 text-[10px] font-rajdhani font-bold uppercase tracking-wider text-red-500 text-center">
-                {reserve > 0
-                  ? `Нечем платить: ${reserve} 🪙 зарезервированы под дневной платёж по кредиту`
-                  : 'На балансе нет монет — нечем платить ставку'}
+                {reserve} 🪙 зарезерированы под дневной платёж по кредиту
               </p>
             )}
 
@@ -1055,18 +1070,23 @@ export default function Upgrader({
               {[1, 2, 3].map((n) => {
                 const packCost = quota.bonusCosts[n - 1];
                 const selected = buyCount === n;
+                const affordable = packCost <= spendable;
                 return (
                   <button
                     key={n}
                     onClick={() => { setBuyCount(n); playSound('click'); }}
                     className={`py-2 px-1 transition-all active:scale-95 ${
-                      selected
-                        ? 'bg-gradient-to-r from-fuchsia-600 to-purple-700 text-white shadow-[0_0_14px_rgba(147,51,234,0.4)]'
-                        : isDark ? 'bg-[#162343] text-slate-300 hover:bg-[#1b2b52]' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      !affordable
+                        ? (isDark ? 'bg-[#141d33] text-slate-600' : 'bg-slate-100 text-slate-400')
+                        : selected
+                          ? 'bg-gradient-to-r from-fuchsia-600 to-purple-700 text-white shadow-[0_0_14px_rgba(147,51,234,0.4)]'
+                          : isDark ? 'bg-[#162343] text-slate-300 hover:bg-[#1b2b52]' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                     }`}
                   >
                     <span className="block font-orbitron font-black text-sm">{n}</span>
-                    <span className={`block font-mono text-[9px] font-bold mt-0.5 ${selected ? 'text-white/85' : 'text-slate-400'}`}>
+                    <span className={`block font-mono text-[9px] font-bold mt-0.5 ${
+                      !affordable ? 'text-slate-600 line-through' : selected ? 'text-white/85' : 'text-slate-400'
+                    }`}>
                       {packCost.toLocaleString('ru-RU')}
                     </span>
                   </button>
@@ -1102,9 +1122,13 @@ export default function Upgrader({
             <div className="mt-5 flex items-center gap-2">
               <button
                 onClick={confirmBuy}
-                className="flex-1 py-2.5 font-orbitron font-black text-[11px] uppercase tracking-widest text-white bg-gradient-to-r from-fuchsia-600 to-purple-700 hover:from-fuchsia-500 hover:to-purple-600 shadow-lg active:scale-95 transition-all"
+                className={`flex-1 py-2.5 font-orbitron font-black text-[11px] uppercase tracking-widest shadow-lg active:scale-95 transition-all ${
+                  notEnoughBuy
+                    ? 'bg-slate-700 text-slate-400 cursor-not-allowed'
+                    : 'text-white bg-gradient-to-r from-fuchsia-600 to-purple-700 hover:from-fuchsia-500 hover:to-purple-600'
+                }`}
               >
-                {isBuying ? 'Покупка...' : `Купить ${buyCount}`}
+                {isBuying ? 'Покупка...' : notEnoughBuy ? 'Недостаточно средств' : `Купить ${buyCount}`}
               </button>
               <button
                 onClick={() => setShowBuy(false)}

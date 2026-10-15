@@ -171,9 +171,13 @@ export default function PayForm({ theme, user, onOpenAuthModal, onBalanceChange,
         <button
           type="submit"
           disabled={isSending}
-          className="w-full py-2 bg-sky-600 hover:bg-sky-700 disabled:opacity-50 text-white font-orbitron font-black"
+          className={`w-full py-2 font-orbitron font-black disabled:opacity-50 ${
+            notEnough
+              ? 'bg-slate-700 text-slate-400 cursor-not-allowed'
+              : 'bg-sky-600 hover:bg-sky-700 text-white'
+          }`}
         >
-          {isSending ? 'Отправка...' : 'Перевести'}
+          {isSending ? 'Отправка...' : notEnough ? 'Недостаточно средств' : 'Перевести'}
         </button>
         {message && (
           <div className={`mt-2 text-center text-sm ${message.type === 'success' ? 'text-emerald-400' : 'text-rose-400'}`}>

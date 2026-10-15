@@ -55,6 +55,22 @@ CREATE TABLE IF NOT EXISTS public.earnings_pool (
   PRIMARY KEY (guild_id, discord_id)
 );
 
+-- How the leader wants every announcement to look, per guild and per alert type
+-- (key: payout / loan / transfer / upgrader). A NULL field means "use the built-in default",
+-- so updating the defaults in the code reaches guilds that never touched the panel.
+CREATE TABLE IF NOT EXISTS public.alert_config (
+  guild_id TEXT NOT NULL,
+  alert_key TEXT NOT NULL,
+  enabled BOOLEAN,
+  channel_id TEXT,
+  title TEXT,
+  template TEXT,
+  color TEXT,
+  mention TEXT,
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  PRIMARY KEY (guild_id, alert_key)
+);
+
 -- One open loan per borrower, repaid by annuity: the DB takes the same fixed amount every day
 -- straight from the balance. daily_payment can never be bigger than the member's daily salary,
 -- so the loan is always affordable; total_due/term_days are what the schedule worked out at issue.
@@ -129,6 +145,7 @@ ALTER TABLE public.logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.salary_payouts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.guild_config ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.earnings_pool ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.alert_config ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.loans ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Allow all for users" ON public.users;
 DROP POLICY IF EXISTS "Allow all for logs" ON public.logs;
@@ -266,8 +283,23 @@ BEGIN
   );
 END $$;
 
+-- One shared calendar day for the round quota: every member gets the 3 free rounds back at the
+-- same moment — 00:00 in Amsterdam, fixed here instead of following the server clock (Render runs
+-- the app in Europe/Moscow).
+CREATE OR REPLACE FUNCTION public.quota_day_start(p_at TIMESTAMPTZ DEFAULT NOW())
+RETURNS TIMESTAMPTZ
+LANGUAGE sql STABLE AS $$
+  SELECT (date_trunc('day', p_at AT TIME ZONE 'Europe/Amsterdam')) AT TIME ZONE 'Europe/Amsterdam';
+$$;
+
+CREATE OR REPLACE FUNCTION public.quota_day_end(p_at TIMESTAMPTZ DEFAULT NOW())
+RETURNS TIMESTAMPTZ
+LANGUAGE sql STABLE AS $$
+  SELECT public.quota_day_start(p_at) + INTERVAL '1 day';
+$$;
+
 -- Upgrader round resolved entirely on the DB side: multiplier = 96 / chance (4% house edge).
--- Free quota: 3 rounds per rolling 24h; beyond that only a purchased bonus round can spin.
+-- Free quota: 3 rounds per Amsterdam calendar day; beyond that only a purchased bonus round can spin.
 -- A lost bet is not burned — it goes straight to the members of the earnings role.
 DROP FUNCTION IF EXISTS public.upgrader_spin(TEXT, BIGINT, NUMERIC, TEXT, TEXT);
 CREATE OR REPLACE FUNCTION public.upgrader_spin(
@@ -286,7 +318,7 @@ DECLARE
   v_bonus_used BOOLEAN := FALSE;
   v_collected BIGINT := 0;
   v_reserve BIGINT := 0;
-  v_window_start TIMESTAMPTZ := NOW() - INTERVAL '24 hours';
+  v_window_start TIMESTAMPTZ := public.quota_day_start();
 BEGIN
   IF p_bet IS NULL OR p_bet < 1 THEN RAISE EXCEPTION 'INVALID_BET'; END IF;
   IF p_chance IS NULL OR p_chance < 1 OR p_chance > 75 THEN RAISE EXCEPTION 'INVALID_CHANCE'; END IF;
@@ -329,21 +361,20 @@ BEGIN
     'balance', v_balance, 'bonus_used', v_bonus_used, 'loss_to_pool', CASE WHEN v_win THEN 0 ELSE p_bet END);
 END $$;
 
--- Round state for the UI: free rounds left in the rolling 24h window and the bonus round price.
+-- Round state for the UI: free rounds left in the current Amsterdam day and the bonus round price.
 -- Bonus price: 1 round = 25% of balance, 2 = 45%, 3 = 60% (buying more is cheaper per round).
 CREATE OR REPLACE FUNCTION public.upgrader_quota(p_discord_id TEXT)
 RETURNS JSONB
 LANGUAGE plpgsql AS $$
 DECLARE
-  v_window_start TIMESTAMPTZ := NOW() - INTERVAL '24 hours';
+  v_window_start TIMESTAMPTZ := public.quota_day_start();
   v_used INT := 0;
-  v_oldest TIMESTAMPTZ;
   v_balance BIGINT := 0;
   v_bonus INT := 0;
   v_bonus_expires TIMESTAMPTZ;
   v_costs BIGINT[];
 BEGIN
-  SELECT COUNT(*), MIN(timestamp) INTO v_used, v_oldest FROM public.logs
+  SELECT COUNT(*) INTO v_used FROM public.logs
    WHERE type = 'upgrader_spin' AND discord_id = p_discord_id AND timestamp >= v_window_start;
 
   SELECT balance, bonus_spins, bonus_expires_at INTO v_balance, v_bonus, v_bonus_expires
@@ -357,7 +388,7 @@ BEGIN
     'limit', 3,
     'used', v_used,
     'left', GREATEST(0, 3 - v_used),
-    'next_reset_at', COALESCE(v_oldest + INTERVAL '24 hours', NOW() + INTERVAL '24 hours'),
+    'next_reset_at', public.quota_day_end(),
     'balance', v_balance,
     'bonus_spins', v_bonus,
     'bonus_expires_at', v_bonus_expires,
@@ -385,10 +416,9 @@ CREATE OR REPLACE FUNCTION public.buy_bonus_spin(p_discord_id TEXT, p_count INT 
 RETURNS JSONB
 LANGUAGE plpgsql AS $$
 DECLARE
-  v_window_start TIMESTAMPTZ := NOW() - INTERVAL '24 hours';
+  v_window_start TIMESTAMPTZ := public.quota_day_start();
   v_balance BIGINT;
   v_used INT;
-  v_oldest TIMESTAMPTZ;
   v_current_bonus INT;
   v_current_expires TIMESTAMPTZ;
   v_cost BIGINT;
@@ -403,13 +433,13 @@ BEGIN
     FROM public.users WHERE discord_id = p_discord_id FOR UPDATE;
   IF NOT FOUND THEN RAISE EXCEPTION 'NO_USER'; END IF;
 
-  SELECT COUNT(*), MIN(timestamp) INTO v_used, v_oldest FROM public.logs
+  SELECT COUNT(*) INTO v_used FROM public.logs
    WHERE type = 'upgrader_spin' AND discord_id = p_discord_id AND timestamp >= v_window_start;
   IF v_used < 3 THEN RAISE EXCEPTION 'FREE_ROUNDS_LEFT'; END IF;
 
   v_costs := public.bonus_costs(v_balance);
   v_cost := v_costs[p_count];
-  v_next_reset := COALESCE(v_oldest + INTERVAL '24 hours', NOW() + INTERVAL '24 hours');
+  v_next_reset := public.quota_day_end();
 
   IF v_balance < v_cost THEN RAISE EXCEPTION 'INSUFFICIENT_FUNDS'; END IF;
   v_reserve := public.loan_reserve(p_discord_id);
@@ -589,7 +619,7 @@ DROP FUNCTION IF EXISTS public.loan_day_rate(TEXT, INT);
 CREATE OR REPLACE FUNCTION public.loan_day_rate()
 RETURNS NUMERIC
 LANGUAGE sql IMMUTABLE AS $$
-  SELECT 2;
+  SELECT 1;
 $$;
 
 DROP FUNCTION IF EXISTS public.loan_term_days(TEXT);
@@ -865,6 +895,121 @@ BEGIN
   RETURN public.loan_offer(p_discord_id);
 END $$;
 
+-- 👑 [Лидер] takes coins away from any member. They are not burned: the coins go to the earnings
+-- role, the same one that collects losses, fees and loan interest. A removal never touches the
+-- coin reserved for the borrower's next daily payment.
+CREATE OR REPLACE FUNCTION public.remove_coins(p_discord_id TEXT, p_amount BIGINT, p_guild_id TEXT DEFAULT NULL)
+RETURNS JSONB
+LANGUAGE plpgsql AS $$
+DECLARE
+  v_balance BIGINT;
+  v_take BIGINT;
+  v_left BIGINT;
+  v_reserve BIGINT;
+  v_collected BIGINT := 0;
+BEGIN
+  IF p_amount IS NULL OR p_amount <= 0 THEN RAISE EXCEPTION 'INVALID_AMOUNT'; END IF;
+
+  SELECT balance INTO v_balance FROM public.users WHERE discord_id = p_discord_id FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'NO_USER'; END IF;
+
+  v_reserve := public.loan_reserve(p_discord_id);
+  v_take := LEAST(p_amount, GREATEST(COALESCE(v_balance, 0) - v_reserve, 0));
+  IF v_take < 1 THEN RAISE EXCEPTION 'NOTHING_TO_REMOVE'; END IF;
+
+  UPDATE public.users
+     SET balance = balance - v_take, updated_at = NOW()
+   WHERE discord_id = p_discord_id
+  RETURNING balance INTO v_left;
+
+  v_collected := public.distribute_earnings(v_take, p_guild_id);
+
+  INSERT INTO public.logs (type, discord_id, amount, fee)
+  VALUES ('coins_removed', p_discord_id, v_take, v_take);
+
+  RETURN jsonb_build_object(
+    'discord_id', p_discord_id,
+    'removed', v_take,
+    'balance', v_left,
+    'reserve', v_reserve,
+    'paid_to_role', v_collected
+  );
+END $$;
+
+-- ─── Announcements (👑 configured by the leader in /alerts) ───
+-- Defaults live here, not in the bot: a NULL field on a stored row means "use the default", so
+-- changing the wording below reaches every guild that never touched the panel.
+-- Variables a template may use: payout {count} {total} {source}; loan {user} {amount} {days}
+-- {payment} (fires when a loan is issued); transfer {user} {target} {amount} {action};
+-- upgrader {user} {amount} {mult} {bet}.
+CREATE OR REPLACE FUNCTION public.get_alerts(p_guild_id TEXT)
+RETURNS JSONB
+LANGUAGE sql STABLE AS $$
+  SELECT COALESCE(jsonb_object_agg(d.key, jsonb_build_object(
+           'key', d.key,
+           'label', d.label,
+           'enabled', COALESCE(c.enabled, TRUE),
+           'channel_id', COALESCE(c.channel_id, ''),
+           'title', COALESCE(c.title, d.title),
+           'template', COALESCE(c.template, d.template),
+           'color', COALESCE(c.color, d.color),
+           'mention', COALESCE(c.mention, 'none'),
+           'default_title', d.title,
+           'default_template', d.template,
+           'default_color', d.color
+         )), '{}'::jsonb)
+    FROM (VALUES
+      ('payout', '💸 Выплата зарплат'::TEXT, '⚡ СУТОЧНАЯ ВЫПЛАТА ЗАРПЛАТ [18:30]'::TEXT,
+       E'Каждые 24 часа в **18:30** бот начисляет монеты по ролям активностей.\nВыплачено: **{count}** участников на **{total} 🪙**.\n{source}'::TEXT, '#00F0FF'::TEXT),
+      ('loan', '🏦 Кредиты', '🏦 КРЕДИТ',
+       '{user} взял кредит на {amount} 🪙 — {days} дней по {payment} 🪙 в день.', '#FFB020'),
+      ('transfer', '💸 Переводы и покупки', '💸 ПЕРЕВОД',
+       '{user} {action} {amount} 🪙 → {target}.', '#3BA55D'),
+      ('upgrader', '🎰 Upgrader: крупные раздачи', '🎰 КРУПНАЯ РАЗДАЧА',
+       '{user} сорвал {amount} 🪙 — множитель x{mult}, ставка {bet} 🪙!', '#EB459E')
+    ) AS d(key, label, title, template, color)
+    LEFT JOIN public.alert_config c
+           ON c.alert_key = d.key AND c.guild_id = p_guild_id;
+$$;
+
+-- One field at a time: only the keys present in p_fields are written, an empty string clears a
+-- field back to its default. Returns the whole (merged) config for the alert type.
+CREATE OR REPLACE FUNCTION public.set_alert(p_guild_id TEXT, p_alert_key TEXT, p_fields JSONB)
+RETURNS JSONB
+LANGUAGE plpgsql AS $$
+DECLARE
+  v_updated INT;
+BEGIN
+  IF p_alert_key IS NULL OR p_alert_key NOT IN ('payout', 'loan', 'transfer', 'upgrader') THEN
+    RAISE EXCEPTION 'UNKNOWN_ALERT';
+  END IF;
+  IF p_fields IS NULL THEN p_fields := '{}'::jsonb; END IF;
+
+  UPDATE public.alert_config
+     SET enabled    = CASE WHEN p_fields -> 'enabled'    IS NOT NULL THEN (p_fields ->> 'enabled')::BOOLEAN ELSE enabled END,
+         channel_id = CASE WHEN p_fields -> 'channel_id' IS NOT NULL THEN NULLIF(btrim(p_fields ->> 'channel_id'), '') ELSE channel_id END,
+         title      = CASE WHEN p_fields -> 'title'      IS NOT NULL THEN NULLIF(btrim(p_fields ->> 'title'), '') ELSE title END,
+         template   = CASE WHEN p_fields -> 'template'   IS NOT NULL THEN NULLIF(btrim(p_fields ->> 'template'), '') ELSE template END,
+         color      = CASE WHEN p_fields -> 'color'      IS NOT NULL THEN NULLIF(btrim(p_fields ->> 'color'), '') ELSE color END,
+         mention    = CASE WHEN p_fields -> 'mention'    IS NOT NULL THEN NULLIF(btrim(p_fields ->> 'mention'), '') ELSE mention END,
+         updated_at = NOW()
+   WHERE guild_id = p_guild_id AND alert_key = p_alert_key;
+  GET DIAGNOSTICS v_updated = ROW_COUNT;
+
+  IF v_updated = 0 THEN
+    INSERT INTO public.alert_config (guild_id, alert_key, enabled, channel_id, title, template, color, mention)
+    VALUES (p_guild_id, p_alert_key,
+            CASE WHEN p_fields -> 'enabled' IS NOT NULL THEN (p_fields ->> 'enabled')::BOOLEAN END,
+            NULLIF(btrim(p_fields ->> 'channel_id'), ''),
+            NULLIF(btrim(p_fields ->> 'title'), ''),
+            NULLIF(btrim(p_fields ->> 'template'), ''),
+            NULLIF(btrim(p_fields ->> 'color'), ''),
+            NULLIF(btrim(p_fields ->> 'mention'), ''));
+  END IF;
+
+  RETURN public.get_alerts(p_guild_id) -> p_alert_key;
+END $$;
+
 REVOKE EXECUTE ON FUNCTION public.add_balances(JSONB) FROM PUBLIC, anon, authenticated;
 REVOKE EXECUTE ON FUNCTION public.transfer_coins(TEXT, TEXT, BIGINT, TEXT, TEXT, TEXT) FROM PUBLIC, anon, authenticated;
 REVOKE EXECUTE ON FUNCTION public.upgrader_spin(TEXT, BIGINT, NUMERIC, TEXT, TEXT, TEXT) FROM PUBLIC, anon, authenticated;
@@ -886,6 +1031,11 @@ REVOKE EXECUTE ON FUNCTION public.accrue_loans(TEXT) FROM PUBLIC, anon, authenti
 REVOKE EXECUTE ON FUNCTION public.loan_offer(TEXT, TEXT, TEXT) FROM PUBLIC, anon, authenticated;
 REVOKE EXECUTE ON FUNCTION public.take_loan(TEXT, BIGINT, INT, TEXT, TEXT, TEXT) FROM PUBLIC, anon, authenticated;
 REVOKE EXECUTE ON FUNCTION public.repay_loan(TEXT, BIGINT) FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.quota_day_start(TIMESTAMPTZ) FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.quota_day_end(TIMESTAMPTZ) FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.remove_coins(TEXT, BIGINT, TEXT) FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.get_alerts(TEXT) FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.set_alert(TEXT, TEXT, JSONB) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.add_balances(JSONB) TO service_role;
 GRANT EXECUTE ON FUNCTION public.transfer_coins(TEXT, TEXT, BIGINT, TEXT, TEXT, TEXT) TO service_role;
 GRANT EXECUTE ON FUNCTION public.upgrader_spin(TEXT, BIGINT, NUMERIC, TEXT, TEXT, TEXT) TO service_role;
@@ -907,5 +1057,10 @@ GRANT EXECUTE ON FUNCTION public.accrue_loans(TEXT) TO service_role;
 GRANT EXECUTE ON FUNCTION public.loan_offer(TEXT, TEXT, TEXT) TO service_role;
 GRANT EXECUTE ON FUNCTION public.take_loan(TEXT, BIGINT, INT, TEXT, TEXT, TEXT) TO service_role;
 GRANT EXECUTE ON FUNCTION public.repay_loan(TEXT, BIGINT) TO service_role;
+GRANT EXECUTE ON FUNCTION public.quota_day_start(TIMESTAMPTZ) TO service_role;
+GRANT EXECUTE ON FUNCTION public.quota_day_end(TIMESTAMPTZ) TO service_role;
+GRANT EXECUTE ON FUNCTION public.remove_coins(TEXT, BIGINT, TEXT) TO service_role;
+GRANT EXECUTE ON FUNCTION public.get_alerts(TEXT) TO service_role;
+GRANT EXECUTE ON FUNCTION public.set_alert(TEXT, TEXT, JSONB) TO service_role;
 
 NOTIFY pgrst, 'reload schema';

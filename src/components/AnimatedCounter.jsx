@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 /**
  * AnimatedCounter: smoothly rolls numbers up or down with glowing Hi-Tech pulse
  */
-export default function AnimatedCounter({ value, className = "", prefix = "", suffix = "" }) {
+export default function AnimatedCounter({ value, className = "", prefix = "", suffix = "", format }) {
   const [displayValue, setDisplayValue] = useState(value);
   const [isAnimating, setIsAnimating] = useState(false);
   const [direction, setDirection] = useState('up'); // 'up' | 'down'
@@ -55,7 +55,7 @@ export default function AnimatedCounter({ value, className = "", prefix = "", su
         isAnimating ? glowColor : ''
       } ${className}`}
     >
-      {prefix}{displayValue.toLocaleString()}{suffix}
+      {prefix}{format ? format(displayValue) : displayValue.toLocaleString()}{suffix}
     </span>
   );
 }

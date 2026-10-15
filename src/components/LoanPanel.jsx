@@ -23,6 +23,7 @@ export default function LoanPanel({ theme, discordUser, userBalance, onUpdateBal
   const [amount, setAmount] = useState('');
   const [percent, setPercent] = useState(50);
   const [payAmount, setPayAmount] = useState('');
+  const [payConfirm, setPayConfirm] = useState(null);
   const [message, setMessage] = useState(null);
   const isDark = theme === 'dark';
 
@@ -43,7 +44,8 @@ export default function LoanPanel({ theme, discordUser, userBalance, onUpdateBal
   const payment = dailyPayment(salary, percent);
   const cap = maxLoanAmount(payment);
   const plan = wanted > 0 && payment > 0 ? loanSchedule(wanted, payment) : null;
-  const charge = offer.dayRate ?? 2;
+  const payValue = Math.floor(Number(payAmount)) || 0;
+  const payShort = payValue > Math.max(userBalance, 0);
 
   const openModal = () => {
     setMessage(null);
@@ -80,6 +82,23 @@ export default function LoanPanel({ theme, discordUser, userBalance, onUpdateBal
     }
   };
 
+  const askRepay = (requested) => {
+    setMessage(null);
+    if (!loan) return;
+    const value = Math.min(Math.max(Math.floor(requested) || 0, 0), loan.remaining, Math.max(userBalance, 0));
+    if (value < 1) {
+      setMessage({ type: 'error', text: 'Нечем гасить: на балансе нет свободных монет.' });
+      return;
+    }
+    const remainingAfter = Math.max(loan.remaining - value, 0);
+    setPayConfirm({
+      value,
+      balanceAfter: Math.max(userBalance - value, 0),
+      remainingAfter,
+      closes: remainingAfter === 0,
+    });
+  };
+
   const handleRepay = async (value) => {
     setMessage(null);
     try {
@@ -92,6 +111,7 @@ export default function LoanPanel({ theme, discordUser, userBalance, onUpdateBal
           : `Осталось ${coins(r.loan?.remainingDue ?? 0)} 🪙 — платёж стал короче на несколько дней.`,
       });
       setPayAmount('');
+      setPayConfirm(null);
       onChanged?.();
     } catch (err) {
       setMessage({ type: 'error', text: err.message });
@@ -100,14 +120,11 @@ export default function LoanPanel({ theme, discordUser, userBalance, onUpdateBal
 
   return (
     <div className={card}>
-      <div className="flex items-center gap-2 mb-1">
+      <div className="flex items-center justify-center gap-2 mb-4">
         <Landmark className="w-5 h-5 text-amber-400" />
-        <h2 className="text-lg sm:text-xl font-orbitron font-black">Кредит под зарплату</h2>
+        <h2 className="text-xl font-orbitron font-black">Кредит монет</h2>
         {offer.demo && <span className={`text-[9px] font-mono font-bold px-1.5 py-0.5 ${isDark ? 'bg-[#162343] text-slate-300' : 'bg-slate-100 text-slate-500'}`}>ДЕМО</span>}
       </div>
-      <p className={`text-xs font-rajdhani mb-4 ${muted}`}>
-        Каждый день с баланса автоматически списывают одну и ту же сумму — часть твоей дневной зарплаты по роли активности.
-      </p>
 
       {loan ? (
         <div className="space-y-4">
@@ -150,40 +167,86 @@ export default function LoanPanel({ theme, discordUser, userBalance, onUpdateBal
           </div>
 
           <div className="space-y-2">
-            <label className={`block text-[11px] font-orbitron font-bold uppercase tracking-wider ${muted}`}>
-              Погасить досрочно (с баланса: {coins(Math.max(userBalance, 0))} 🪙)
-            </label>
-            <input
-              type="number"
-              min="1"
-              step="1"
-              placeholder="Сумма погашения"
-              className={field}
-              value={payAmount}
-              onChange={(e) => setPayAmount(e.target.value)}
-            />
-            <div className="flex gap-2">
-              <button
-                onClick={() => handleRepay(Math.floor(Number(payAmount)) || 0)}
-                disabled={busy}
-                className="flex-1 py-2 font-orbitron font-black text-[11px] uppercase tracking-widest text-white bg-emerald-600 hover:bg-emerald-500 active:scale-95 transition-all disabled:opacity-50"
-              >
-                Погасить
-              </button>
-              <button
-                onClick={() => handleRepay(Math.min(loan.remaining, Math.max(userBalance, 0)))}
-                disabled={busy}
-                className={`flex-1 py-2 font-orbitron font-black text-[11px] uppercase tracking-widest active:scale-95 transition-all disabled:opacity-50 ${
-                  isDark ? 'bg-[#162343] text-slate-200 hover:bg-[#1b2b52]' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-                }`}
-              >
-                Всё, что есть
-              </button>
-            </div>
-            {userBalance <= 0 && (
-              <p className="text-[11px] font-rajdhani text-rose-400">
-                Нечем гасить — монеты придут с зарплатой или победами в Upgrader.
-              </p>
+            {payConfirm === null ? (
+              <>
+                <label className={`block text-[11px] font-orbitron font-bold uppercase tracking-wider ${muted}`}>
+                  Погасить досрочно (с баланса: {coins(Math.max(userBalance, 0))} 🪙)
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  placeholder="Сумма погашения"
+                  className={field}
+                  value={payAmount}
+                  onChange={(e) => setPayAmount(e.target.value)}
+                />
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => askRepay(payValue)}
+                    disabled={busy}
+                    className={`flex-1 py-2 font-orbitron font-black text-[11px] uppercase tracking-widest active:scale-95 transition-all disabled:opacity-50 ${
+                      payShort
+                        ? 'bg-slate-700 text-slate-400 cursor-not-allowed'
+                        : 'text-white bg-emerald-600 hover:bg-emerald-500'
+                    }`}
+                  >
+                    {payShort ? 'Недостаточно средств' : 'Погасить'}
+                  </button>
+                  <button
+                    onClick={() => askRepay(Math.min(loan.remaining, Math.max(userBalance, 0)))}
+                    disabled={busy}
+                    className={`flex-1 py-2 font-orbitron font-black text-[11px] uppercase tracking-widest active:scale-95 transition-all disabled:opacity-50 ${
+                      userBalance < 1
+                        ? 'bg-slate-700 text-slate-400 cursor-not-allowed'
+                        : isDark ? 'bg-[#162343] text-slate-200 hover:bg-[#1b2b52]' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                    }`}
+                  >
+                    {userBalance < 1 ? 'Недостаточно средств' : 'Всё, что есть'}
+                  </button>
+                </div>
+                {userBalance <= 0 && (
+                  <p className="text-[11px] font-rajdhani text-rose-400">
+                    Нечем гасить — монеты придут с зарплатой или победами в Upgrader.
+                  </p>
+                )}
+              </>
+            ) : (
+              <div className={`p-3 space-y-3 ${isDark ? 'bg-[#0f1a30]' : 'bg-slate-50'}`}>
+                <p className="text-[11px] font-orbitron font-bold uppercase tracking-wider text-amber-400">
+                  Подтверди погашение
+                </p>
+                <div className="space-y-1.5 text-xs font-rajdhani">
+                  <p className="flex justify-between gap-2"><span className={muted}>Списываем с баланса</span><b>{coins(payConfirm.value)} 🪙</b></p>
+                  <p className="flex justify-between gap-2"><span className={muted}>Останется на балансе</span><b>{coins(payConfirm.balanceAfter)} 🪙</b></p>
+                  <p className="flex justify-between gap-2">
+                    <span className={muted}>Долг после</span>
+                    <b>{payConfirm.closes ? 'закрыт' : `${coins(payConfirm.remainingAfter)} 🪙`}</b>
+                  </p>
+                </div>
+                <p className={`text-[11px] font-rajdhani leading-relaxed ${muted}`}>
+                  {payConfirm.closes
+                    ? 'Кредит закроется полностью — резерв на дневной платёж освободится и брать новый кредит можно сразу.'
+                    : 'Срок пересчитается: платежи останутся теми же, но закончатся раньше.'}
+                </p>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => handleRepay(payConfirm.value)}
+                    disabled={busy}
+                    className="flex-1 py-2 font-orbitron font-black text-[11px] uppercase tracking-widest text-white bg-emerald-600 hover:bg-emerald-500 active:scale-95 transition-all disabled:opacity-50"
+                  >
+                    {busy ? 'Гашу...' : 'Подтвердить'}
+                  </button>
+                  <button
+                    onClick={() => setPayConfirm(null)}
+                    className={`flex-1 py-2 font-orbitron font-black text-[11px] uppercase tracking-widest active:scale-95 transition-all ${
+                      isDark ? 'bg-[#162343] text-slate-300 hover:bg-[#1b2b52]' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    }`}
+                  >
+                    Назад
+                  </button>
+                </div>
+              </div>
             )}
           </div>
         </div>
@@ -201,11 +264,6 @@ export default function LoanPanel({ theme, discordUser, userBalance, onUpdateBal
               <p className={`text-[10px] font-rajdhani ${muted}`}>при платеже {formatPercent(PAYMENT_PERCENT_MAX)} зарплаты</p>
             </div>
           </div>
-
-          <p className={`text-[11px] font-rajdhani leading-relaxed ${muted}`}>
-            Процент {formatPercent(charge)} в день от остающегося долга. Сколько платить и когда закроешь — считается само,
-            когда выберешь сумму и часть зарплаты.
-          </p>
 
           <button
             onClick={openModal}
@@ -306,9 +364,9 @@ export default function LoanPanel({ theme, discordUser, userBalance, onUpdateBal
 
                 {plan && (
                   <div className={`p-3 text-xs font-rajdhani space-y-1 ${isDark ? 'bg-[#0f1a30]' : 'bg-slate-50'}`}>
-                    <p>Вернёшь всего: <b>{coins(wanted + plan.interest)} 🪙</b></p>
-                    <p>Переплата: <b className="text-amber-400">{coins(plan.interest)} 🪙</b> за {plan.days} {dayWord(plan.days)}</p>
-                    <p className={muted}>Проценты уходят роли, которая собирает проигрыши и комиссии.</p>
+                    <p className="flex justify-between gap-2"><span className={muted}>Срок</span><b>{plan.days} {dayWord(plan.days)}</b></p>
+                    <p className="flex justify-between gap-2"><span className={muted}>Вернёшь всего</span><b>{coins(wanted + plan.interest)} 🪙</b></p>
+                    <p className="flex justify-between gap-2"><span className={muted}>Переплата</span><b className="text-amber-400">{coins(plan.interest)} 🪙</b></p>
                   </div>
                 )}
 

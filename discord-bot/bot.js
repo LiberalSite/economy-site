@@ -14,6 +14,7 @@ import {
   PermissionFlagsBits
 } from 'discord.js';
 import * as db from '../lib/db.js';
+import { setAlertClient, sendAlert, alertsCommand, handleAlertsInteraction } from './alerts.js';
 
 const SITE_URL = process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || 'https://lg-economy.onrender.com';
 const PAYOUT_HOUR = 18;
@@ -219,6 +220,18 @@ const commands = [
     .setDescription('👑 [Лидер] Начислить монеты конкретному пользователю')
     .addUserOption(opt => opt.setName('user').setDescription('Кому начислить').setRequired(true))
     .addIntegerOption(opt => opt.setName('amount').setDescription('Количество монет').setRequired(true).setMinValue(1))
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+
+  new SlashCommandBuilder()
+    .setName('remove')
+    .setDescription('👑 [Лидер] Забрать монеты у участника — они уходят роли-получателю')
+    .addUserOption(opt => opt.setName('user').setDescription('У кого забрать').setRequired(true))
+    .addIntegerOption(opt => opt.setName('amount').setDescription('Сколько забрать').setRequired(true).setMinValue(1))
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+
+  new SlashCommandBuilder()
+    .setName('alerts')
+    .setDescription('👑 [Лидер] Настроить оповещения: канал, текст, цвет и кого упоминать')
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
 ];
 
@@ -242,19 +255,10 @@ async function payGuildSalaries(guild) {
 
 async function announcePayout(guild, result) {
   if (result.count === 0) return;
-  const channel = guild.systemChannel || guild.channels.cache.find(c =>
-    c.isTextBased() && (c.name.includes('основн') || c.name.includes('general') || c.name.includes('чат') || c.name.includes('бот'))
-  );
-  if (!channel) return;
   const source = result.collected > 0
-    ? `Собрано с роли-получателя: **${result.collected.toLocaleString('ru-RU')} 🪙**${result.printed > 0 ? `, напечатано недостающего: **${result.printed.toLocaleString('ru-RU')} 🪙**` : ''}`
+    ? `Собрано с роли-получателя: **${num(result.collected)} 🪙**${result.printed > 0 ? `, напечатано недостающего: **${num(result.printed)} 🪙**` : ''}`
     : 'Монеты напечатаны (зарплаты «из ниоткуда»).';
-  const embed = new EmbedBuilder()
-    .setColor('#00F0FF')
-    .setTitle('⚡ СУТОЧНАЯ ВЫПЛАТА ЗАРПЛАТ [18:30]')
-    .setDescription(`Каждые 24 часа в **18:30** бот начисляет монеты всем участникам по активным ролям.\nВыплачено участникам: **${result.count}** на сумму **${result.total.toLocaleString('ru-RU')} 🪙**\n${source}`)
-    .setFooter({ text: 'LG ECONOMY 2026 // Прозрачная система' });
-  await channel.send({ embeds: [embed] }).catch(() => {});
+  await sendAlert('payout', { count: num(result.count), total: num(result.total), source }, guild);
 }
 
 const todayLocal = () => new Date().toLocaleDateString('sv-SE');
@@ -319,6 +323,7 @@ async function registerGuildCommands(rest, guild) {
 
 client.once(Events.ClientReady, async () => {
   console.log(`🤖 Бот LG ECONOMY запущен под именем: ${client.user.tag}`);
+  setAlertClient(client);
   console.log(`🔗 Ссылка для добавления бота: https://discord.com/oauth2/authorize?client_id=${process.env.DISCORD_CLIENT_ID}&permissions=8&scope=bot%20applications.commands`);
 
   const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_BOT_TOKEN);
@@ -406,6 +411,17 @@ const loanDate = (value) => new Date(value).toLocaleString('ru-RU', {
   day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit',
 });
 const rateText = (value) => `${Number(value).toLocaleString('ru-RU', { maximumFractionDigits: 1 })}%`;
+
+// Announced through the leader's 'loan' template, so a broken alert can never break the command
+function announceLoan(guild, username, loan) {
+  if (!loan) return;
+  sendAlert('loan', {
+    user: username,
+    amount: num(loan.principal),
+    days: num(loan.term_days),
+    payment: num(loan.daily_payment),
+  }, guild);
+}
 
 // offer = public.loan_offer() result
 function loanEmbed(o) {
@@ -520,6 +536,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
         if (err instanceof db.DbError && err.userMessage) return interaction.reply({ content: dbErrorText(err), ...EPHEMERAL });
         throw err;
       }
+      sendAlert('transfer', {
+        user: username,
+        target: displayName(targetUser, targetMember),
+        amount: num(r.paid),
+        action: 'перевёл',
+      }, interaction.guild);
       return interaction.reply({
         content: [
           `💸 **${username}** → <@${targetUser.id}>`,
@@ -637,6 +659,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         const percent = interaction.options.getInteger('percent') || 100;
         await interaction.deferReply(EPHEMERAL);
         const o = await db.takeLoan(userId, amount, percent, username, avatar, guildId);
+        announceLoan(interaction.guild, username, o.loan);
         return interaction.editReply({
           embeds: [loanEmbed(o).setTitle(`✅ КРЕДИТ ВЫДАН: ${num(amount)} 🪙`)],
         });
@@ -670,11 +693,49 @@ client.on(Events.InteractionCreate, async (interaction) => {
         content: `👑 **[ЛИДЕР]** Начислено **+${amount.toLocaleString('ru-RU')} 🪙** пользователю <@${targetUser.id}>!\nНовый баланс участника: **${newBal.toLocaleString('ru-RU')} 🪙**.`
       });
     }
+
+    if (commandName === 'alerts') {
+      if (!isLeader(interaction.member, interaction.guild)) {
+        return interaction.reply({ content: '❌ **Доступ запрещен!** Команда доступна только Лидеру / Администратору сервера.', ...EPHEMERAL });
+      }
+      return alertsCommand(interaction);
+    }
+
+    if (commandName === 'remove') {
+      if (!isLeader(interaction.member, interaction.guild)) {
+        return interaction.reply({ content: '❌ **Доступ запрещен!** Команда доступна только Лидеру / Администратору сервера.', ...EPHEMERAL });
+      }
+      const targetUser = interaction.options.getUser('user');
+      const amount = interaction.options.getInteger('amount');
+      await interaction.deferReply(EPHEMERAL);
+      const r = await db.removeCoins(targetUser.id, amount, interaction.guild?.id || null);
+      const back = r.reserve > 0
+        ? `\n💸 ${num(r.reserve)} 🪙 не тронуты — они зарезерированы под дневной платёж по кредиту.`
+        : '';
+      const short = r.removed < amount
+        ? `\nЗабрал столько, сколько было свободно: просил ${num(amount)}, забрал ${num(r.removed)}.`
+        : '';
+      return interaction.editReply({
+        content: `👑 **[ЛИДЕР]** У <@${targetUser.id}> забрано **-${r.removed.toLocaleString('ru-RU')} 🪙**.\n` +
+          `Баланс участника теперь: **${num(r.balance)} 🪙**. Монеты ушли роли-получателю.${back}${short}`
+      });
+    }
   } catch (err) {
     console.error(`Ошибка команды /${commandName}:`, err);
     const payload = { content: dbErrorText(err), ...EPHEMERAL };
     if (interaction.deferred || interaction.replied) await interaction.editReply(payload).catch(() => {});
     else await interaction.reply(payload).catch(() => {});
+  }
+});
+
+// Buttons / menus / modals of the /alerts panel
+client.on(Events.InteractionCreate, async (interaction) => {
+  if (!interaction.isButton() && !interaction.isAnySelectMenu() && !interaction.isModalSubmit()) return;
+  try {
+    await handleAlertsInteraction(interaction);
+  } catch (err) {
+    console.error('Ошибка панели оповещений:', err);
+    await interaction.reply({ content: '❌ Не получилось сохранить, попробуй ещё раз.', ...EPHEMERAL }).catch(() => {});
   }
 });
 
@@ -729,6 +790,12 @@ client.on(Events.MessageCreate, async (message) => {
         if (err instanceof db.DbError && err.userMessage) return message.reply(dbErrorText(err));
         throw err;
       }
+      sendAlert('transfer', {
+        user: authorName,
+        target: displayName(targetUser, message.mentions.members?.get(targetUser.id)),
+        amount: num(r.paid),
+        action: 'перевёл',
+      }, message.guild);
       return message.reply(
         `💸 **${authorName}** → <@${targetUser.id}>\n` +
         `Списано: **${r.paid.toLocaleString('ru-RU')} 🪙** · Получено: **${r.received.toLocaleString('ru-RU')} 🪙** · ` +
@@ -755,6 +822,23 @@ client.on(Events.MessageCreate, async (message) => {
 
       const newBal = await db.addBalance(targetUser.id, amount, displayName(targetUser, message.mentions.members?.get(targetUser.id)));
       return message.reply(`👑 **[ЛИДЕР]** Начислено **+${amount.toLocaleString('ru-RU')} 🪙** пользователю <@${targetUser.id}>!\nНовый баланс участника: **${newBal.toLocaleString('ru-RU')} 🪙**.`);
+    }
+
+    if (cmd === 'remove' || cmd === 'забрать' || cmd === 'забери') {
+      if (!isLeader(message.member, message.guild)) {
+        return message.reply('❌ **Доступ запрещен!** Команда доступна только Лидеру / Администратору сервера.');
+      }
+      const targetUser = message.mentions.users.filter(u => u.id !== client.user.id).first();
+      const amount = parseAmount();
+      if (!targetUser) return message.reply('❌ Укажите пользователя: `!remove @user сумма`');
+      if (!amount) return message.reply('❌ Укажите сумму монет: `!remove @user сумма`');
+
+      const r = await db.removeCoins(targetUser.id, amount, message.guild.id);
+      return message.reply(
+        `👑 **[ЛИДЕР]** У <@${targetUser.id}> забрано **-${num(r.removed)} 🪙**.\n` +
+        `Баланс участника теперь: **${num(r.balance)} 🪙**. Монеты ушли роли-получателю.` +
+        (r.reserve > 0 ? `\n💸 ${num(r.reserve)} 🪙 не тронуты — они зарезерированы под дневной платёж по кредиту.` : '')
+      );
     }
 
     if (cmd === 'upgrader' || cmd === 'сайт') {
@@ -819,6 +903,7 @@ client.on(Events.MessageCreate, async (message) => {
       if (amount) {
         if (message.member?.roles?.cache) await syncMemberSalary(message.member).catch(() => {});
         const o = await db.takeLoan(message.author.id, amount, percent, authorName, avatar, guildId);
+        announceLoan(message.guild, authorName, o.loan);
         return message.reply({ embeds: [loanEmbed(o).setTitle(`✅ КРЕДИТ ВЫДАН: ${num(amount)} 🪙`)] });
       }
       if (message.member?.roles?.cache) await syncMemberSalary(message.member).catch(() => {});
@@ -851,11 +936,13 @@ client.on(Events.MessageCreate, async (message) => {
         `• \`/loan repay\` или \`!repay 2000\` — погасить кредит\n\n` +
         `👑 **Команды Лидера / Администратора:**\n` +
         `• \`/give @user сумма\` или \`!give @user сумма\` — начислить монеты участнику\n` +
+        `• \`/remove @user сумма\` или \`!remove @user сумма\` — забрать монеты у участника (уходят роли-получателю)\n` +
         `• \`/payout\` или \`!payout\` — запустить выплаты всем прямо сейчас\n` +
         `• \`/setup_roles\` — создать все 8 ролей активности автоматически\n` +
         `• \`/set_earnings_role @роль\` или \`!earnings_role @роль\` — кто получает проигрыши и комиссии\n` +
         `• \`/set_salary_source\` или \`!salary_source print|pool\` — зарплаты печатать или снимать с этой роли\n` +
-        `• \`/earnings\` или \`!earnings\` — текущие настройки и участники роли\n\n` +
+        `• \`/earnings\` или \`!earnings\` — текущие настройки и участники роли\n` +
+        `• \`/alerts\` — настроить оповещения: в какой канал, включать или нет, заголовок, текст, цвет и кого упоминать\n\n` +
         `⚠️ Кредит: раз в сутки с баланса автоматически списывают фиксированный платёж (часть твоей дневной зарплаты). Пока кредит открыт, на балансе должен оставаться запас в один платёж — его нельзя поставить или перевести. Новый кредит — после полного погашения.`
       );
     }

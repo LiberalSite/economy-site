@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { guestLoanReserve } from './useLoan';
+import { quotaDayWindow } from '../lib/quotaDay';
 
 export const SPIN_LIMIT = 3;
-const WINDOW_MS = 24 * 60 * 60 * 1000;
 const GUEST_KEY = 'fazenn_guest_spins';
 
 function loadGuest() {
@@ -34,13 +34,14 @@ function bonusCosts(balance) {
 }
 
 function guestView(state, balance, now) {
-  const fresh = state.spins.filter((t) => now - t < WINDOW_MS);
+  const { start, end } = quotaDayWindow(now);
+  const fresh = state.spins.filter((t) => t >= start);
   const costs = bonusCosts(balance);
   return {
     limit: SPIN_LIMIT,
     used: fresh.length,
     left: Math.max(0, SPIN_LIMIT - fresh.length),
-    nextResetAt: fresh.length ? Math.min(...fresh) + WINDOW_MS : now + WINDOW_MS,
+    nextResetAt: end,
     bonusSpins: state.bonusExpiresAt > now ? state.bonusSpins : 0,
     bonusCosts: costs,
     bonusCost: costs[0],
@@ -61,7 +62,7 @@ function serverView(data, now) {
   };
 }
 
-// 3 free rounds per rolling 24h. Logged-in users are counted by Postgres; guests by localStorage.
+// 3 free rounds per calendar day (00:00 Amsterdam). Logged-in users are counted by Postgres; guests by localStorage.
 export default function useSpinQuota({ discordUser, guestBalance, onGuestBalance }) {
   const [server, setServer] = useState(null);
   const [guest, setGuest] = useState(() => loadGuest() || { spins: [], bonusSpins: 0, bonusExpiresAt: 0 });
@@ -91,7 +92,7 @@ export default function useSpinQuota({ discordUser, guestBalance, onGuestBalance
   // Quota until the server answers, so a logged-in user is never shown a wrong 0/3.
   const pending = Boolean(discordUser) && !server;
   const quota = pending
-    ? { limit: SPIN_LIMIT, used: 0, left: SPIN_LIMIT, nextResetAt: now + WINDOW_MS, bonusSpins: 0, bonusCosts: [0, 0, 0], bonusCost: 0 }
+    ? { limit: SPIN_LIMIT, used: 0, left: SPIN_LIMIT, nextResetAt: quotaDayWindow(now).end, bonusSpins: 0, bonusCosts: [0, 0, 0], bonusCost: 0 }
     : discordUser
       ? serverView(server, now)
       : guestView(guest, guestBalance, now);
@@ -103,7 +104,7 @@ export default function useSpinQuota({ discordUser, guestBalance, onGuestBalance
       return;
     }
     const ts = Date.now();
-    const fresh = guest.spins.filter((t) => ts - t < WINDOW_MS);
+    const fresh = guest.spins.filter((t) => t >= quotaDayWindow(ts).start);
     const bonusLive = guest.bonusExpiresAt > ts ? guest.bonusSpins : 0;
     // past 3 rounds in the window the round came out of the purchased bonus
     const usedBonus = fresh.length >= SPIN_LIMIT && bonusLive > 0;
@@ -140,7 +141,7 @@ export default function useSpinQuota({ discordUser, guestBalance, onGuestBalance
         : 'Недостаточно монет на балансе');
     }
     const next = {
-      spins: guest.spins.filter((t) => ts - t < WINDOW_MS),
+      spins: guest.spins.filter((t) => t >= quotaDayWindow(ts).start),
       bonusSpins: current.bonusSpins + count,
       bonusExpiresAt: current.nextResetAt,
     };

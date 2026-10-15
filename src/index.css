@@ -167,3 +167,84 @@ body.dark-theme {
   pointer-events: none;
 }
 
+/* ============================================================
+   Upgrader backdrop: drifting neon glows, a tech grid and a
+   light beam. Sits behind the panels (see `isolate` + -z-10).
+   ============================================================ */
+@keyframes upgraderDrift {
+  0%   { transform: translate3d(-4%, -3%, 0) scale(1); }
+  50%  { transform: translate3d(5%, 4%, 0) scale(1.14); }
+  100% { transform: translate3d(-4%, -3%, 0) scale(1); }
+}
+
+@keyframes upgraderGridScroll {
+  from { background-position: 0 0, 0 0; }
+  to   { background-position: 0 -48px, 48px 0; }
+}
+
+@keyframes upgraderBeam {
+  0%   { transform: translateX(-40%) skewX(-18deg); opacity: 0; }
+  25%  { opacity: .5; }
+  65%  { opacity: 0; }
+  100% { transform: translateX(340%) skewX(-18deg); opacity: 0; }
+}
+
+.upgrader-bg {
+  position: absolute;
+  inset: 0;
+  z-index: -10;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.upgrader-glow {
+  position: absolute;
+  inset: -25%;
+  filter: blur(8px);
+  background:
+    radial-gradient(closest-side, rgba(34, 211, 238, 0.30), transparent 72%) 22% 32% / 58% 58% no-repeat,
+    radial-gradient(closest-side, rgba(168, 85, 247, 0.24), transparent 72%) 78% 68% / 52% 52% no-repeat,
+    radial-gradient(closest-side, rgba(250, 204, 21, 0.16), transparent 72%) 58% 22% / 40% 40% no-repeat;
+  animation: upgraderDrift 26s ease-in-out infinite;
+}
+
+/* second glow layer, different colours and rhythm so the two never pulse together */
+.upgrader-glow-2 {
+  background:
+    radial-gradient(closest-side, rgba(236, 72, 153, 0.20), transparent 72%) 35% 72% / 50% 50% no-repeat,
+    radial-gradient(closest-side, rgba(45, 212, 191, 0.22), transparent 72%) 72% 30% / 46% 46% no-repeat;
+  animation-duration: 34s;
+  animation-direction: reverse;
+  opacity: .85;
+}
+
+.upgrader-grid {
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(56, 189, 248, 0.10) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(56, 189, 248, 0.10) 1px, transparent 1px);
+  background-size: 48px 48px;
+  -webkit-mask-image: radial-gradient(closest-side at 50% 46%, #000 12%, transparent 78%);
+  mask-image: radial-gradient(closest-side at 50% 46%, #000 12%, transparent 78%);
+  animation: upgraderGridScroll 11s linear infinite;
+}
+
+.upgrader-beam {
+  position: absolute;
+  top: -10%;
+  bottom: -10%;
+  left: 0;
+  width: 24%;
+  background: linear-gradient(90deg, transparent, rgba(125, 211, 252, 0.22), transparent);
+  animation: upgraderBeam 9s ease-in-out infinite;
+}
+
+.upgrader-bg.is-light { opacity: .55; }
+
+@media (prefers-reduced-motion: reduce) {
+  .upgrader-glow,
+  .upgrader-grid,
+  .upgrader-beam { animation: none; }
+}
+

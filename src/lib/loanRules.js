@@ -2,7 +2,7 @@
 // A loan is repaid by annuity: the DB takes the same daily payment every day, and that payment is
 // a share of the daily activity salary — the borrower picks the share, the whole salary is the max.
 export const LOAN_MIN = 100;
-export const LOAN_DAY_RATE = 2; // % of the debt still owed, charged every day, paid to the earnings role
+export const LOAN_DAY_RATE = 1; // % of the debt still owed, charged every day, paid to the earnings role
 export const PAYMENT_PERCENT_MIN = 10;
 export const PAYMENT_PERCENT_MAX = 100;
 export const DAY_MS = 24 * 60 * 60 * 1000;

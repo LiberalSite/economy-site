@@ -6,6 +6,8 @@ import { fileURLToPath } from 'url';
 try { process.loadEnvFile(); } catch {}
 
 const db = await import('./lib/db.js');
+// Same announcement pipeline the bot uses; it stays silent until the bot registers its client.
+const alerts = await import('./discord-bot/alerts.js');
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isDev = process.argv.includes('--dev');
@@ -203,6 +205,12 @@ app.post('/api/economy/pay', requireUser, async (req, res) => {
   if (!isDiscordId(targetId) || pay < 1) return res.status(400).json({ error: 'Некорректная сумма или получатель' });
   try {
     const r = await db.transfer(req.user.id, targetId, pay, req.user.username);
+    alerts.sendAlert('transfer', {
+      user: req.user.username,
+      target: `<@${targetId}>`,
+      amount: r.paid.toLocaleString('ru-RU'),
+      action: 'перевёл',
+    });
     res.json({
       success: true,
       senderBalance: r.sender_balance,
@@ -227,6 +235,14 @@ app.post('/api/upgrader/spin', requireUser, async (req, res) => {
   if (!Number.isFinite(chance) || chance < 1 || chance > 75) return res.status(400).json({ error: 'Шанс должен быть от 1 до 75%' });
   try {
     const r = await db.upgraderSpin(req.user.id, bet, Math.round(chance * 100) / 100, req.user.username, req.user.avatar);
+    if (r.is_win && Number(r.amount) >= alerts.BIG_WIN_MIN) {
+      alerts.sendAlert('upgrader', {
+        user: req.user.username,
+        amount: Number(r.amount).toLocaleString('ru-RU'),
+        mult: Number(r.mult).toLocaleString('ru-RU'),
+        bet: bet.toLocaleString('ru-RU'),
+      });
+    }
     const q = await db.upgraderQuota(req.user.id);
     res.json({
       success: true,
@@ -268,6 +284,12 @@ app.post('/api/upgrader/buy-spin', requireUser, async (req, res) => {
   const count = Math.min(3, Math.max(1, toPositiveInt(req.body?.count) || 1));
   try {
     const q = await db.buyBonusSpin(req.user.id, count);
+    alerts.sendAlert('transfer', {
+      user: req.user.username,
+      target: `${count} доп. спин(ов) в Upgrader`,
+      amount: Number(q.cost).toLocaleString('ru-RU'),
+      action: 'купил',
+    });
     res.json({ success: true, cost: Number(q.cost), count, balance: Number(q.balance), ...quotaPayload(q) });
   } catch (err) {
     sendDbError(res, err);
@@ -321,7 +343,16 @@ app.post('/api/loan/take', requireUser, async (req, res) => {
   const percent = Math.min(100, Math.max(10, toPositiveInt(req.body?.percent) || 100));
   if (!amount) return res.status(400).json({ error: 'Укажи сумму кредита' });
   try {
-    res.json({ success: true, ...loanPayload(await db.takeLoan(req.user.id, amount, percent, req.user.username, req.user.avatar)) });
+    const o = await db.takeLoan(req.user.id, amount, percent, req.user.username, req.user.avatar);
+    if (o.loan) {
+      alerts.sendAlert('loan', {
+        user: req.user.username,
+        amount: Number(o.loan.principal).toLocaleString('ru-RU'),
+        days: Number(o.loan.term_days).toLocaleString('ru-RU'),
+        payment: Number(o.loan.daily_payment).toLocaleString('ru-RU'),
+      });
+    }
+    res.json({ success: true, ...loanPayload(o) });
   } catch (err) {
     sendDbError(res, err);
   }
